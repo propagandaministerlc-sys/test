@@ -149,7 +149,7 @@ class GridViewModel(application: Application) : AndroidViewModel(application) {
             busy = true
             try {
                 tiles = TileExporter.export(
-                    getApplication(), bitmap, crop, rows, columns, ratio, filter, overlay, prefix, this::orderOf,
+                    getApplication(), bitmap, crop, rows, columns, ratio, filter, overlay, prefix, this@GridViewModel::orderOf,
                 )
                 posted = emptySet()
                 message = "Saved ${tiles.size} images to Pictures/${TileExporter.ALBUM}"
