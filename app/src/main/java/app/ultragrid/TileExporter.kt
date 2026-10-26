@@ -23,8 +23,9 @@ object TileExporter {
     private const val THUMBNAIL_WIDTH = 360
 
     /**
-     * Cuts [crop] of [source] into a rows × columns grid, saves each tile as a JPEG in
-     * Pictures/UltraGrid and returns them in on-screen (top-left first) order.
+     * Cuts [crop] of [source] into a rows × columns grid with [filter] and [overlay] applied,
+     * saves each tile as a JPEG in Pictures/UltraGrid and returns them in on-screen
+     * (top-left first) order. [orderOf] gives each tile's posting order, starting at 1.
      */
     suspend fun export(
         context: Context,
@@ -33,21 +34,24 @@ object TileExporter {
         rows: Int,
         columns: Int,
         ratio: TileRatio,
+        filter: PhotoFilter,
+        overlay: TextOverlay,
+        prefix: String,
+        orderOf: (row: Int, column: Int) -> Int,
     ): List<SavedTile> = withContext(Dispatchers.IO) {
-        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+        val stamp = timestamp()
+        val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG).apply {
+            colorFilter = filter.androidColorFilter()
+        }
         val left = crop.left * source.width
         val top = crop.top * source.height
         val tileWidth = crop.width * source.width / columns
         val tileHeight = crop.height * source.height / rows
         val dst = Rect(0, 0, ratio.width, ratio.height)
-        val total = rows * columns
+        val cells = (0 until rows).flatMap { r -> (0 until columns).map { c -> Triple(r, c, orderOf(r, c)) } }
 
         // Saved in posting order so the gallery lists them in a sensible sequence.
-        val tiles = (1..total).map { order ->
-            val index = total - order
-            val row = index / columns
-            val column = index % columns
+        val tiles = cells.sortedBy { it.third }.map { (row, column, order) ->
             val src = Rect(
                 (left + column * tileWidth).roundToInt().coerceIn(0, source.width - 1),
                 (top + row * tileHeight).roundToInt().coerceIn(0, source.height - 1),
@@ -55,8 +59,13 @@ object TileExporter {
                 (top + (row + 1) * tileHeight).roundToInt().coerceIn(1, source.height),
             )
             val tile = Bitmap.createBitmap(ratio.width, ratio.height, Bitmap.Config.ARGB_8888)
-            Canvas(tile).drawBitmap(source, src, dst, paint)
-            val uri = save(context, tile, "UltraGrid_${stamp}_%02d.jpg".format(Locale.US, order))
+            val canvas = Canvas(tile)
+            canvas.drawBitmap(source, src, dst, paint)
+            canvas.save()
+            canvas.translate(-column * ratio.width.toFloat(), -row * ratio.height.toFloat())
+            overlay.draw(canvas, (columns * ratio.width).toFloat(), (rows * ratio.height).toFloat())
+            canvas.restore()
+            val uri = saveJpeg(context, tile, "${prefix}_${stamp}_%02d.jpg".format(Locale.US, order))
             val thumbnail = Bitmap.createScaledBitmap(
                 tile,
                 THUMBNAIL_WIDTH,
@@ -69,7 +78,10 @@ object TileExporter {
         tiles.sortedBy { it.row * columns + it.column }
     }
 
-    private fun save(context: Context, bitmap: Bitmap, name: String): Uri {
+    fun timestamp(): String = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+
+    /** Writes [bitmap] to Pictures/UltraGrid through MediaStore; needs no permissions. */
+    fun saveJpeg(context: Context, bitmap: Bitmap, name: String): Uri {
         val resolver = context.contentResolver
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, name)

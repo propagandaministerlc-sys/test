@@ -11,14 +11,14 @@ object ImageLoader {
     /** Large enough for five rows of full-resolution tiles without exhausting memory. */
     private const val MAX_DECODE_EDGE = 5000
 
-    /** Decodes [uri] as a mutable-friendly software bitmap, honouring EXIF rotation. */
-    fun decode(context: Context, uri: Uri): Bitmap {
+    /** Decodes [uri] as a software bitmap no larger than [maxEdge], honouring EXIF rotation. */
+    fun decode(context: Context, uri: Uri, maxEdge: Int = MAX_DECODE_EDGE): Bitmap {
         val source = ImageDecoder.createSource(context.contentResolver, uri)
         return ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
             val longest = max(info.size.width, info.size.height)
-            if (longest > MAX_DECODE_EDGE) {
-                val scale = MAX_DECODE_EDGE.toFloat() / longest
+            if (longest > maxEdge) {
+                val scale = maxEdge.toFloat() / longest
                 decoder.setTargetSize(
                     (info.size.width * scale).roundToInt().coerceAtLeast(1),
                     (info.size.height * scale).roundToInt().coerceAtLeast(1),
