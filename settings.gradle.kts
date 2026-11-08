@@ -15,5 +15,9 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "UltraGrid"
-include(":app")
-include(":hearing")
+// The Windows build passes -PdesktopOnly so it does not need the Android SDK.
+if (!providers.gradleProperty("desktopOnly").isPresent) {
+    include(":app")
+    include(":hearing")
+}
+include(":desktop")

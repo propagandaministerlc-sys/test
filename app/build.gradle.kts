@@ -40,6 +40,10 @@ android {
     buildFeatures {
         compose = true
     }
+    sourceSets {
+        // Plain Kotlin shared with the Windows app in :desktop.
+        getByName("main").java.srcDir("src/shared/kotlin")
+    }
 }
 
 dependencies {

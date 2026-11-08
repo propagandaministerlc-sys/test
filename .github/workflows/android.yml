@@ -12,9 +12,8 @@ on:
 
 jobs:
   build:
+    name: Android apps
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -38,28 +37,75 @@ jobs:
           name: klar-hoerhilfe-apk
           path: hearing/build/outputs/apk/**/*.apk
 
-      - name: Collect release APKs
-        if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+  windows:
+    name: UltraGrid for Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build installer and portable app
+        shell: bash
+        run: ./gradlew --no-daemon -PdesktopOnly :desktop:packageExe :desktop:createDistributable
+
+      - name: Zip portable app
+        shell: pwsh
+        run: Compress-Archive -Path desktop/build/compose/binaries/main/app/UltraGrid -DestinationPath UltraGrid-Windows-portable.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ultragrid-windows
+          path: |
+            desktop/build/compose/binaries/main/exe/*.exe
+            UltraGrid-Windows-portable.zip
+
+  release:
+    name: Publish release
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+    needs: [build, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Collect files
         run: |
           mkdir -p release
-          cp app/build/outputs/apk/release/app-release.apk "release/UltraGrid-${{ inputs.release_tag }}.apk"
-          cp hearing/build/outputs/apk/release/hearing-release.apk "release/Klar-Hoerhilfe-${{ inputs.release_tag }}.apk"
+          cp artifacts/ultragrid-apk/release/app-release.apk "release/UltraGrid-${{ inputs.release_tag }}.apk"
+          cp artifacts/klar-hoerhilfe-apk/release/hearing-release.apk "release/Klar-Hoerhilfe-${{ inputs.release_tag }}.apk"
+          cp artifacts/ultragrid-windows/desktop/build/compose/binaries/main/exe/*.exe "release/UltraGrid-${{ inputs.release_tag }}-Windows-Setup.exe"
+          cp artifacts/ultragrid-windows/UltraGrid-Windows-portable.zip "release/UltraGrid-${{ inputs.release_tag }}-Windows-portable.zip"
+          ls -la release
 
       - name: Publish GitHub release
-        if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.release_tag }}
           target_commitish: ${{ github.sha }}
           name: UltraGrid & Klar ${{ inputs.release_tag }}
-          files: release/*.apk
+          files: release/*
           body: |
-            Zwei Android-Apps zum direkten Installieren (Android 10 oder neuer):
+            **Android** (Android 10 oder neuer):
 
-            - **UltraGrid-${{ inputs.release_tag }}.apk** – Instagram-Grid, Karussell, Collage und Feed-Planer.
+            - **UltraGrid-${{ inputs.release_tag }}.apk** – Grid- und Bento-Kompositionen, Profil-Grid, Karussell und Feed-Planer.
             - **Klar-Hoerhilfe-${{ inputs.release_tag }}.apk** – macht AirPods zur Hörhilfe: Stimmen hervorheben, Störgeräusche dämpfen, Hörtest und Equalizer.
 
             APK auf dem Handy öffnen und installieren. Eventuell musst du „Installation aus unbekannten Quellen“ erlauben.
-            Beide APKs sind mit einem Debug-Schlüssel signiert und nicht für Google Play gedacht.
+
+            **Windows** (Windows 10 oder 11, 64 Bit):
+
+            - **UltraGrid-${{ inputs.release_tag }}-Windows-Setup.exe** – Installer mit Startmenü- und Desktop-Verknüpfung.
+            - **UltraGrid-${{ inputs.release_tag }}-Windows-portable.zip** – ohne Installation: entpacken und `UltraGrid.exe` starten.
+
+            Die Dateien sind nicht signiert. Windows SmartScreen fragt deshalb beim ersten Start nach: „Weitere Informationen“ → „Trotzdem ausführen“.
 
             Klar ist kein Medizinprodukt und ersetzt kein Hörgerät.

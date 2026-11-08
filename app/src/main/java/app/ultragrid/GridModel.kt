@@ -3,17 +3,6 @@ package app.ultragrid
 import android.net.Uri
 import androidx.compose.ui.graphics.ImageBitmap
 
-/** Instagram profiles are always three columns wide. */
-const val GRID_COLUMNS = 3
-const val MAX_ROWS = 5
-const val MAX_SLIDES = 10
-
-enum class TileRatio(val label: String, val description: String, val width: Int, val height: Int) {
-    PROFILE("3:4", "Fills Instagram's profile grid exactly (1080×1440).", 1080, 1440),
-    PORTRAIT("4:5", "Largest portrait size shown uncropped in the feed (1080×1350).", 1080, 1350),
-    SQUARE("1:1", "Classic square posts (1080×1080).", 1080, 1080),
-}
-
 /** The two ways a single photo can be split. */
 enum class SplitMode(
     val title: String,

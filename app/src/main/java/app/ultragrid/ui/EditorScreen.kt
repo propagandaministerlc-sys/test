@@ -57,6 +57,7 @@ import app.ultragrid.SplitMode
 import app.ultragrid.TEXT_COLORS
 import app.ultragrid.TextOverlay
 import app.ultragrid.TileRatio
+import app.ultragrid.composeColorFilter
 import kotlin.math.roundToInt
 
 @Composable

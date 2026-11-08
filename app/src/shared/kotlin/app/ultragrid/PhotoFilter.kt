@@ -1,11 +1,10 @@
 package app.ultragrid
 
-import android.graphics.ColorMatrixColorFilter
-import androidx.compose.ui.graphics.ColorFilter
-import androidx.compose.ui.graphics.ColorMatrix
-
-/** Colour presets, applied identically to the on-screen preview and the exported files. */
-enum class PhotoFilter(val label: String, private val matrix: FloatArray?) {
+/**
+ * Colour presets, applied identically to the on-screen preview and the exported files.
+ * [matrix] is a 4×5 colour matrix in Android's convention (offsets in 0..255 colour units).
+ */
+enum class PhotoFilter(val label: String, val matrix: FloatArray?) {
     ORIGINAL("Original", null),
     VIVID("Vivid", saturation(1.4f)),
     WARM("Warm", channelScale(1.08f, 1.0f, 0.9f)),
@@ -13,11 +12,6 @@ enum class PhotoFilter(val label: String, private val matrix: FloatArray?) {
     FADE("Fade", contrast(0.85f, 30f)),
     MONO("B&W", saturation(0f)),
     NOIR("Noir", noir()),
-    ;
-
-    fun androidColorFilter(): android.graphics.ColorFilter? = matrix?.let { ColorMatrixColorFilter(it) }
-
-    fun composeColorFilter(): ColorFilter? = matrix?.let { ColorFilter.colorMatrix(ColorMatrix(it.copyOf())) }
 }
 
 private fun saturation(s: Float): FloatArray {
