@@ -4,10 +4,17 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Publish a GitHub release with this tag (e.g. v1.0). Leave empty for a normal build."
+        required: false
+        default: ""
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -30,3 +37,29 @@ jobs:
         with:
           name: klar-hoerhilfe-apk
           path: hearing/build/outputs/apk/**/*.apk
+
+      - name: Collect release APKs
+        if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+        run: |
+          mkdir -p release
+          cp app/build/outputs/apk/release/app-release.apk "release/UltraGrid-${{ inputs.release_tag }}.apk"
+          cp hearing/build/outputs/apk/release/hearing-release.apk "release/Klar-Hoerhilfe-${{ inputs.release_tag }}.apk"
+
+      - name: Publish GitHub release
+        if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          target_commitish: ${{ github.sha }}
+          name: UltraGrid & Klar ${{ inputs.release_tag }}
+          files: release/*.apk
+          body: |
+            Zwei Android-Apps zum direkten Installieren (Android 10 oder neuer):
+
+            - **UltraGrid-${{ inputs.release_tag }}.apk** – Instagram-Grid, Karussell, Collage und Feed-Planer.
+            - **Klar-Hoerhilfe-${{ inputs.release_tag }}.apk** – macht AirPods zur Hörhilfe: Stimmen hervorheben, Störgeräusche dämpfen, Hörtest und Equalizer.
+
+            APK auf dem Handy öffnen und installieren. Eventuell musst du „Installation aus unbekannten Quellen“ erlauben.
+            Beide APKs sind mit einem Debug-Schlüssel signiert und nicht für Google Play gedacht.
+
+            Klar ist kein Medizinprodukt und ersetzt kein Hörgerät.
