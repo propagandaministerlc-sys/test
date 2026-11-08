@@ -19,10 +19,13 @@ The home screen has four tools.
 - Cut a wide or panoramic photo into **2–10 slides** that swipe as one continuous picture.
 - "Post carousel to Instagram" hands every slide to Instagram at once, in order.
 
-### Collage
-- Six layouts: 2 across, 2 stacked, 3 stacked, 2×2, 1 + 2 and 2×3. Tap a cell to pick its photo.
-- Choose the shape, filter, spacing between photos and a white or black background.
-- Save it, or save and share straight to Instagram.
+### Composition (Grid & Bento)
+- **Grid** layouts (2 × 1 up to 3 × 3) and **Bento** layouts (Feature, Stagger, Mosaic, Story, Hero, Offset).
+- **Drag the handles** between frames to resize them. Dividers snap to **¼, ½ and ¾** of their row or column and **line up with other dividers** ("Match"), with a guide line and haptic tick.
+- **Independent crop**: drag a photo to move it inside its frame, pinch to zoom.
+- **Formats**: 4:5 feed, 9:16 story, 1:1 square, 1.91:1 landscape and 3:4 profile (all 1080 px wide).
+- **Style**: frame gap, corner radius, optional outer border and five background colours, plus the photo filters.
+- Tap an empty frame to fill it, or use *Add photos* to fill several at once. Selected frames can be replaced, swapped, reset or cleared.
 
 ### Feed planner
 - Add the photos you plan to post and see them laid out like your profile, newest top-left.
@@ -63,14 +66,18 @@ This needs JDK 17+ and the Android SDK, with `ANDROID_HOME` set or a `local.prop
 | `GridModel.kt` | Modes, tile ratios, crop math, posting order |
 | `PhotoFilter.kt` | Colour-matrix filter presets |
 | `TextOverlay.kt` | Text drawn across the full picture before it is split |
-| `Collage.kt` | Collage templates and renderer |
+| `Composition.kt` | Layout tree, templates, divider snapping, formats, spacing maths |
+| `CompositionRenderer.kt` | Draws compositions for preview and export |
+| `CropMath.kt` | Zoom/pan → crop rectangle |
 | `ImageLoader.kt` | Decodes photos with EXIF rotation and caps their size |
 | `TileExporter.kt` | Slices the crop into tiles and saves them through MediaStore |
 | `Sharing.kt` | Hands a tile to Instagram, or to the share sheet |
 | `Thumbnails.kt` | Cached thumbnails for the planner |
 | `GridViewModel.kt` | Grid and carousel editor state |
-| `CollageViewModel.kt` | Collage state and export |
+| `CompositionViewModel.kt` | Composition editor state and export |
 | `PlannerViewModel.kt` | Feed plan, saved in SharedPreferences |
-| `ui/` | Jetpack Compose screens: home, editor, result, collage, planner |
+| `ui/` | Jetpack Compose screens: home, editor, result, composition, planner |
+
+The UI uses the Inter typeface (SIL Open Font License, see `app/src/main/assets/licenses/Inter-OFL.txt`).
 
 Before publishing to Google Play, set up a real release signing config in `app/build.gradle.kts`.

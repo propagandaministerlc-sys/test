@@ -32,12 +32,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
-import app.ultragrid.CollageViewModel
+import app.ultragrid.CompositionViewModel
 import app.ultragrid.GridViewModel
 import app.ultragrid.PlannerViewModel
 import app.ultragrid.SplitMode
 
-enum class Screen { HOME, GRID, CAROUSEL, COLLAGE, PLANNER }
+enum class Screen { HOME, GRID, CAROUSEL, COMPOSITION, PLANNER }
 
 class NavViewModel : ViewModel() {
     var screen by mutableStateOf(Screen.HOME)
@@ -48,7 +48,7 @@ class NavViewModel : ViewModel() {
 fun UltraGridApp(
     nav: NavViewModel,
     grid: GridViewModel,
-    collage: CollageViewModel,
+    composition: CompositionViewModel,
     planner: PlannerViewModel,
 ) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -59,7 +59,7 @@ fun UltraGridApp(
 
     val snackbar = remember { SnackbarHostState() }
     MessageEffect(grid.message, snackbar, grid::clearMessage)
-    MessageEffect(collage.message, snackbar, collage::clearMessage)
+    MessageEffect(composition.message, snackbar, composition::clearMessage)
     MessageEffect(planner.message, snackbar, planner::clearMessage)
 
     val editingSplit = nav.screen == Screen.GRID || nav.screen == Screen.CAROUSEL
@@ -83,7 +83,7 @@ fun UltraGridApp(
                     grid.preview != null -> EditorScreen(grid, onPick = pick, onBack = goHome)
                     else -> PickPhotoScreen(grid.mode, busy = grid.busy, onPick = pick, onBack = goHome)
                 }
-                Screen.COLLAGE -> CollageScreen(collage, onBack = goHome)
+                Screen.COMPOSITION -> CompositionScreen(composition, onBack = goHome)
                 Screen.PLANNER -> PlannerScreen(planner, onBack = goHome)
             }
         }

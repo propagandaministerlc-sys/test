@@ -16,7 +16,7 @@ import app.ultragrid.ui.UltraGridTheme
 class MainActivity : ComponentActivity() {
     private val nav: NavViewModel by viewModels()
     private val grid: GridViewModel by viewModels()
-    private val collage: CollageViewModel by viewModels()
+    private val composition: CompositionViewModel by viewModels()
     private val planner: PlannerViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -25,7 +25,7 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) handleShare(intent)
         setContent {
             UltraGridTheme {
-                UltraGridApp(nav, grid, collage, planner)
+                UltraGridApp(nav, grid, composition, planner)
             }
         }
     }
