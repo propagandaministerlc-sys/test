@@ -8,7 +8,6 @@ import app.klar.model.Ear
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
-import kotlin.coroutines.coroutineContext
 import kotlin.math.PI
 import kotlin.math.min
 import kotlin.math.pow
@@ -58,7 +57,7 @@ class TonePlayer : AutoCloseable {
             var offset = 0
             val chunk = 2 * sampleRate / 20
             while (offset < buffer.size) {
-                coroutineContext.ensureActive()
+                ensureActive()
                 val n = track.write(buffer, offset, min(chunk, buffer.size - offset), AudioTrack.WRITE_BLOCKING)
                 if (n <= 0) break
                 offset += n

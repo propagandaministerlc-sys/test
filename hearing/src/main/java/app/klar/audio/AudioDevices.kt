@@ -1,12 +1,12 @@
 package app.klar.audio
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
-import androidx.core.content.ContextCompat
 
 /** The headphones the processed sound will play on. */
 data class Headphones(
@@ -85,9 +85,9 @@ object AudioDevices {
         am.isBluetoothScoOn = true
         val filter = IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED)
         repeat(40) {
-            val sticky: Intent? = ContextCompat.registerReceiver(
-                context, null, filter, ContextCompat.RECEIVER_EXPORTED,
-            )
+            // Reads the sticky broadcast without registering anything (Android 11 and older only).
+            @SuppressLint("UnspecifiedRegisterReceiverFlag")
+            val sticky: Intent? = context.registerReceiver(null, filter)
             val state = sticky?.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, -1)
             if (state == AudioManager.SCO_AUDIO_STATE_CONNECTED) return true
             Thread.sleep(100)
