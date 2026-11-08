@@ -1,5 +1,7 @@
 # UltraGrid for Android
 
+> This repository also contains **Klar**, a hearing-assist app for AirPods, in [`hearing/`](hearing/README.md). Its APK is in the `klar-hoerhilfe-apk` artifact of the **Build APK** workflow.
+
 Turn one photo into a seamless Instagram profile grid.
 
 ## Features

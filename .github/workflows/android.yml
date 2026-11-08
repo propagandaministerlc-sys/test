@@ -25,3 +25,8 @@ jobs:
         with:
           name: ultragrid-apk
           path: app/build/outputs/apk/**/*.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: klar-hoerhilfe-apk
+          path: hearing/build/outputs/apk/**/*.apk

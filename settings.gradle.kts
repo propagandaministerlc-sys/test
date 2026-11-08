@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "UltraGrid"
 include(":app")
+include(":hearing")
