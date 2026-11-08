@@ -37,7 +37,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Exe, TargetFormat.Msi)
             packageName = "UltraGrid"
-            packageVersion = "1.1.0"
+            packageVersion = "1.2.0"
             description = "Custom photo grids for Instagram"
             vendor = "UltraGrid"
             copyright = "UltraGrid"

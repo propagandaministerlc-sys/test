@@ -233,7 +233,7 @@ private fun Sidebar(page: Page, onSelect: (Page) -> Unit, dark: Boolean, onToggl
         )
         Spacer(Modifier.height(20.dp))
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 8.dp)) {
-            Text("v1.1", style = MonoStyle, color = c.muted, modifier = Modifier.weight(1f))
+            Text("v1.2", style = MonoStyle, color = c.muted, modifier = Modifier.weight(1f))
             GhostButton(if (dark) "Light" else "Dark", onClick = onToggleTheme)
         }
     }
