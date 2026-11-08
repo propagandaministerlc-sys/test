@@ -9,6 +9,11 @@ on:
         description: "Publish a GitHub release with this tag (e.g. v1.0). Leave empty for a normal build."
         required: false
         default: ""
+      desktop_preview:
+        description: "Also take a screenshot of the desktop app (Linux, virtual display)."
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   build:
@@ -64,6 +69,42 @@ jobs:
           path: |
             desktop/build/compose/binaries/main/exe/*.exe
             UltraGrid-Windows-portable.zip
+
+  desktop-preview:
+    name: Desktop screenshot
+    if: github.event_name == 'workflow_dispatch' && inputs.desktop_preview
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build
+        run: ./gradlew --no-daemon -PdesktopOnly :desktop:createDistributable
+
+      - name: Run and screenshot
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb imagemagick > /dev/null
+          mkdir -p demo shots
+          convert -size 1600x1200 plasma:fractal -blur 0x2 demo/1.jpg
+          convert -size 1200x1600 gradient:'#6CD49C'-'#0A0C0E' demo/2.jpg
+          convert -size 1200x1200 plasma:'#F1F1EC'-'#1E2A33' demo/3.jpg
+          convert -size 1600x1000 radial-gradient:'#F3B562'-'#1E2A33' demo/4.jpg
+          export ULTRAGRID_DEMO_DIR=$PWD/demo
+          Xvfb :99 -screen 0 1600x1000x24 & sleep 2
+          export DISPLAY=:99
+          desktop/build/compose/binaries/main/app/UltraGrid/bin/UltraGrid & sleep 25
+          import -window root shots/composition.png
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-screenshot
+          path: shots/*.png
 
   release:
     name: Publish release

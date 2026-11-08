@@ -119,6 +119,13 @@ private fun UltraGridDesktop(window: ComposeWindow) {
         onDispose { window.contentPane.dropTarget = null }
     }
 
+    // For automated screenshots: preload images from a folder.
+    LaunchedEffect(Unit) {
+        System.getenv("ULTRAGRID_DEMO_DIR")?.let { dir ->
+            File(dir).listFiles()?.filter(Dialogs::isImage)?.sortedBy { it.name }?.let(composition::addPhotos)
+        }
+    }
+
     val message = status.message
     LaunchedEffect(status.serial) {
         if (message != null) {
