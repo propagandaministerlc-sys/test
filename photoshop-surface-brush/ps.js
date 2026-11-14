@@ -264,10 +264,35 @@ async function selectLayer(layer) {
  * damit die Wirkung in großen Fotos nicht verschwindet.
  */
 function docParams(p, W, H) {
-  const k = Math.max(1, Math.max(W, H) / 1500);
   const q = Object.assign({}, p);
+  if (q.autoB > 0) {
+    // Automatik: alle Längen aus der Pinselbreite ableiten
+    const B = q.autoB;
+    q.wrap = 0.35 * B;
+    q.follow = 0.4 * B;
+    q.snap = 0.25 * B;
+    q.radius = 1.5 * B;
+    q.scale = q.autoScale > 0 ? q.autoScale : Math.max(1.5, B / 6);
+    return q;
+  }
+  const k = Math.max(1, Math.max(W, H) / 1500);
   for (const key of ["wrap", "follow", "snap", "radius", "scale"]) if (q[key] != null) q[key] = q[key] * k;
   return q;
+}
+
+/** Automatik: passende Faltengröße für diesen Bildausschnitt und diese Pinselbreite bestimmen. */
+function autoScaleFor(base, w, h, B) {
+  const d = Math.min(1, 500 / Math.max(w, h));
+  const dw = Math.max(1, Math.round(w * d));
+  const dh = Math.max(1, Math.round(h * d));
+  const small = d < 1 ? scaleBufAny(base, w, h, 3, dw, dh) : base;
+  const pick = SC.pickScale(small, dw, dh, 3, [(B / 12) * d, (B / 6) * d, (B / 3) * d]);
+  return Math.min(60, Math.max(1.5, pick / d));
+}
+function scaleBufAny(src, w, h, comps, tw, th) {
+  const out = new Uint8Array(tw * th * comps);
+  SC.blit(src, w, h, comps, out, tw, th, comps, 0, 0, tw, th);
+  return out;
 }
 
 function histId(doc) {
@@ -335,6 +360,24 @@ async function apply(mode, p) {
   if (lb.right <= lb.left || lb.bottom <= lb.top) {
     throw new UserError("Die Malebene ist leer. Erst mit dem Pinsel malen, dann »Anwenden«.");
   }
+  let autoInfo = null;
+  if (p.auto) {
+    await core.executeAsModal(
+      async () => {
+        const lw = lb.right - lb.left;
+        const lh = lb.bottom - lb.top;
+        const z = workSize(lw, lh, 1);
+        const probe = new Uint8Array(z.tw * z.th * 4);
+        await step("Malebene lesen", () => readInto(probe, z.tw, z.th, 4, lb, lb, doc, layer.id));
+        const B = SC.strokeWidth(probe, z.tw, z.th) / z.s;
+        if (B > 0) {
+          p = docParams(Object.assign({}, p, { autoB: B }), dw, dh);
+          autoInfo = { brush: B };
+        }
+      },
+      { commandName: "Surface Brush: Pinselbreite messen" }
+    );
+  }
   const margin = Math.ceil(
     mode === "paint" ? p.wrap + p.follow + 8 : mode === "recolor" ? p.snap * 3 + 8 : p.radius * 3
   );
@@ -366,6 +409,10 @@ async function apply(mode, p) {
 
     let out;
     await step("Berechnung", async () => {
+    if (autoInfo) {
+      p.scale = autoScaleFor(base, tw, th, autoInfo.brush * s) / s;
+      autoInfo.scale = p.scale;
+    }
     const an = SC.analyze(base, tw, th, 3, Math.max(1, p.scale * s));
     if (mode === "paint") out = SC.paint(an, stroke, { wrap: p.wrap * s, follow: p.follow * s, shade: p.shade });
     else if (mode === "recolor") out = SC.recolor(an, stroke, { snap: p.snap * s, shade: p.shade, highlights: p.highlights });
@@ -381,7 +428,7 @@ async function apply(mode, p) {
     resultOf[layer.id] = result.id;
     sourceOf[result.id] = layer.id;
   });
-  return { width: tw, height: th, scale: s };
+  return { width: tw, height: th, scale: s, auto: autoInfo };
 }
 
 /** Zerlegt das sichtbare Bild in Albedo, Schattierung (Multiplizieren) und Normalen. */
@@ -445,7 +492,7 @@ function isModalBusy(e) {
   return (e && e.number === 9) || m.indexOf("modal") >= 0;
 }
 function marginFor(mode, p) {
-  return Math.ceil(mode === "paint" ? p.wrap + p.follow + 8 : mode === "recolor" ? p.snap * 3 + 8 : p.radius * 3);
+  return Math.ceil(mode === "paint" ? p.wrap + p.follow + 8 : mode === "recolor" ? p.snap * 3 + 8 : p.radius * 2.5);
 }
 function modeOpts(mode, p, s) {
   if (mode === "paint") return { wrap: p.wrap * s, follow: p.follow * s, shade: p.shade };
@@ -464,7 +511,14 @@ function computeNorm(st, scale) {
 
 /** Berechnet das Ergebnis für rect (+Rand) aus allen bisherigen Strichen neu und schreibt es. */
 async function renderRegion(st, doc, result, rect) {
-  const p = st.getParams();
+  let p = st.getParams();
+  if (p.auto && st.autoB > 0) {
+    if (!(st.autoScale > 0)) {
+      const c = cropBuf(st.base, st.W, 3, rect);
+      st.autoScale = autoScaleFor(c, rect.right - rect.left, rect.bottom - rect.top, st.autoB);
+    }
+    p = docParams(Object.assign({}, st.rawParams(), { autoB: st.autoB, autoScale: st.autoScale }), st.W, st.H);
+  }
   if (st.normScale !== p.scale) computeNorm(st, p.scale);
   const m = marginFor(st.mode, p);
   const region = {
@@ -475,13 +529,29 @@ async function renderRegion(st, doc, result, rect) {
   };
   const W = region.right - region.left;
   const H = region.bottom - region.top;
-  const { s, tw, th } = workSize(W, H, p.megapixels);
+  // Gerechnet wird mit zusätzlichem Umfeld, damit auch Striche außerhalb des geschriebenen Bereichs
+  // (z. B. benachbarte Lichtquellen) einfließen und Teilbereiche nahtlos aneinander passen.
+  const ctx = {
+    left: Math.max(0, region.left - m),
+    top: Math.max(0, region.top - m),
+    right: Math.min(st.W, region.right + m),
+    bottom: Math.min(st.H, region.bottom + m),
+  };
+  const CW = ctx.right - ctx.left;
+  const CH = ctx.bottom - ctx.top;
+  const { s, tw, th } = workSize(CW, CH, p.megapixels);
   let out;
   await step("Berechnung", async () => {
-    const base = scaleBuf(cropBuf(st.base, st.W, 3, region), W, H, 3, tw, th);
-    const stroke = scaleBuf(cropBuf(st.accum, st.W, 4, region), W, H, 4, tw, th);
+    const base = scaleBuf(cropBuf(st.base, st.W, 3, ctx), CW, CH, 3, tw, th);
+    const stroke = scaleBuf(cropBuf(st.accum, st.W, 4, ctx), CW, CH, 4, tw, th);
     const an = SC.analyze(base, tw, th, 3, Math.max(1, p.scale * s), st.norm * s);
-    out = upscale(SC[st.mode](an, stroke, modeOpts(st.mode, p, s)), tw, th, W, H);
+    const full = upscale(SC[st.mode](an, stroke, modeOpts(st.mode, p, s)), tw, th, CW, CH);
+    out = cropBuf(full, CW, 4, {
+      left: region.left - ctx.left,
+      top: region.top - ctx.top,
+      right: region.right - ctx.left,
+      bottom: region.bottom - ctx.top,
+    });
   });
   await step("Ergebnis schreiben", () => putRGBA(doc, result.id, out, W, H, region.left, region.top));
   return s;
@@ -554,6 +624,11 @@ async function liveTick(st, fromEvent) {
         merged[i + 3] = Math.round(oa * 255);
       }
       pasteBuf(st.accum, st.W, 4, lb, merged);
+      const B = SC.strokeWidth(ns, w, h);
+      if (B > 0) {
+        st.autoB = B;
+        st.autoScale = 0; // für diesen Strich neu aus dem Bild bestimmen
+      }
       // Malebene leeren (der rohe Strich wird durch das Ergebnis ersetzt)
       await step("Malebene leeren", () => putRGBA(doc, paint.id, new Uint8Array(w * h * 4), w, h, lb.left, lb.top));
       scale = await renderRegion(st, doc, result, lb);
@@ -561,7 +636,10 @@ async function liveTick(st, fromEvent) {
     if (scale !== null) {
       st.onStatus(
         "Live: Strich übernommen (" + ((Date.now() - t0) / 1000).toFixed(1) + " s)" +
-          (scale < 0.999 ? ", mit " + Math.round(scale * 100) + " % Auflösung gerechnet." : "."),
+          (scale < 0.999 ? ", mit " + Math.round(scale * 100) + " % Auflösung gerechnet." : ".") +
+          (st.getParams().auto && st.autoB > 0
+            ? " Automatik: Pinsel ≈ " + Math.round(st.autoB) + " px, Faltengröße " + Math.round(st.autoScale) + " px."
+            : ""),
         false
       );
     }
@@ -584,7 +662,8 @@ async function startLive(mode, getParams, onStatus) {
   const H = doc.height;
   if (W * H > 60e6) throw new UserError("Das Dokument ist für den Live-Modus zu groß (über 60 Megapixel).");
   const st = {
-    docId: doc.id, W, H, mode, onStatus, lastHist: null,
+    docId: doc.id, W, H, mode, onStatus, lastHist: null, autoB: 0, autoScale: 0,
+    rawParams: getParams,
     getParams: () => docParams(getParams(), W, H),
     base: new Uint8Array(W * H * 3), accum: new Uint8Array(W * H * 4),
     undo: [], busy: true, norm: 0, normScale: -1, resultId: null, paintId: null, timer: null, listener: null,
@@ -646,6 +725,10 @@ async function setLiveMode(mode) {
       st.mode = mode;
       st.accum = new Uint8Array(st.W * st.H * 4);
       st.undo = [];
+      // Bild neu einlesen: Der neue Modus arbeitet auf dem bisherigen Ergebnis weiter
+      const full = { left: 0, top: 0, right: st.W, bottom: st.H };
+      await step("Bild lesen", () => readInto(st.base, st.W, st.H, 3, full, full, doc, null));
+      st.normScale = -1;
       await createLivePair(st, doc);
     });
   } finally {

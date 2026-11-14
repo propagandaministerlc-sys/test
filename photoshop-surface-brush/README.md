@@ -50,6 +50,10 @@ Das Bild unter den Strichen wird beim Start einmal eingelesen. Wer danach das Fo
 4. Modus wählen (Pinsel / Umfärben / Licht) und **2 · Anwenden** klicken.
 5. Regler ändern und erneut **Anwenden** ersetzt das Ergebnis. Mit Strg/Cmd+Z geht alles in einem Schritt zurück.
 
+### Automatik
+
+Ist **Automatik** angehakt (Standard), misst das Plugin die Breite jedes Strichs und leitet daraus Wölbung, Faltenfluss, Kanten-Fang und Licht-Ausbreitung ab. Die Faltengröße wird je Strich aus dem Bild bestimmt: Es wird die Strukturgröße gewählt, bei der der Bildbereich das stärkste Relief zeigt. Die Längen-Regler sind dann ausgeblendet; ohne Haken gelten wieder die Regler.
+
 ### Regler
 
 Die Längen-Regler (Wölbung, Faltenfluss, Kanten-Fang, Ausbreitung, Faltengröße) beziehen sich auf ein Bild mit 1500 px langer Seite und wachsen automatisch mit der Bildgröße.

@@ -48,8 +48,20 @@ function liveStatus(text, isError) {
   updateLiveButton();
 }
 
+function isAuto() {
+  const el = $("auto");
+  return !!(el && el.checked);
+}
+/** In der Automatik werden die Längen-Regler ausgeblendet – sie ergeben sich aus Pinsel und Bild. */
+function updateAuto() {
+  const auto = isAuto();
+  ["wrap", "follow", "snap", "radius", "scale"].forEach((id) => {
+    $(id).style.display = auto ? "none" : "";
+  });
+}
+
 function params() {
-  const common = { scale: num("scale"), megapixels: num("quality") };
+  const common = { scale: num("scale"), megapixels: num("quality"), auto: isAuto() };
   if (mode === "paint") {
     return Object.assign(common, { wrap: num("wrap"), follow: num("follow"), shade: num("paintShade") / 100 });
   }
@@ -80,6 +92,9 @@ async function run(label, fn) {
     let msg = "Fertig (" + ((Date.now() - t0) / 1000).toFixed(1) + " s).";
     if (info && info.scale < 0.999) {
       msg += " Mit " + Math.round(info.scale * 100) + " % Auflösung gerechnet – für mehr Details »Max. Rechenauflösung« erhöhen.";
+    }
+    if (info && info.auto) {
+      msg += " Automatik: Pinsel ≈ " + Math.round(info.auto.brush) + " px, Faltengröße " + Math.round(info.auto.scale) + " px.";
     }
     if (info === "live") msg = ps.isLive() ? "Live-Modus läuft: Einfach mit dem Pinsel malen – jeder Strich wird beim Loslassen übernommen." : "Live-Modus beendet.";
     else if (info === "undo") msg = "Letzter Strich zurückgenommen.";
@@ -120,7 +135,10 @@ function init() {
   );
   $("apply").addEventListener("click", () => run("Berechne", () => ps.apply(mode, params())));
   $("decompose").addEventListener("click", () => run("Zerlege Bild", () => ps.decompose(params())));
+  $("auto").addEventListener("change", updateAuto);
+  $("auto").addEventListener("click", () => setTimeout(updateAuto, 0));
   setMode("paint");
+  updateAuto();
 }
 
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);

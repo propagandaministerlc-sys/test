@@ -145,6 +145,28 @@ assert(cover(results.paint) > 0.5 * cover(sPaint), "Pinsel: Ergebnis enthält Fa
   assert(Math.abs(dst[(120 * 320 + 160) * 4] - results.base[(240 * W + 320) * 4]) < 12, "Skalieren funktioniert");
 }
 
+{
+  // Licht: Berechnung auf einem Ausschnitt (mit Umfeld) = Berechnung auf dem ganzen Bild -> keine Nähte
+  const R = 20;
+  const two = strokes([
+    { x0: 200, y0: 240, x1: 210, y1: 240, r: 12, c: [255, 255, 255], soft: 4 },
+    { x0: 330, y0: 240, x1: 340, y1: 240, r: 12, c: [255, 255, 255], soft: 4 },
+  ]);
+  const o = { radius: R, intensity: 1, height: 0.4, relief: 0.5 };
+  const whole = core.light(an, two, o);
+  const x0 = 140, x1 = 520, cw = x1 - x0;
+  const cb = new Uint8Array(cw * H * 3), cs = new Uint8Array(cw * H * 4);
+  for (let y = 0; y < H; y++) {
+    cb.set(base.subarray((y * W + x0) * 3, (y * W + x1) * 3), y * cw * 3);
+    cs.set(two.subarray((y * W + x0) * 4, (y * W + x1) * 4), y * cw * 4);
+  }
+  const part = core.light(core.analyze(cb, cw, H, 3, 5, an.norm), cs, o);
+  let worst = 0;
+  for (let y = 100; y < 380; y++) for (let x = 230; x < 430; x++) for (let k = 0; k < 4; k++)
+    worst = Math.max(worst, Math.abs(part[(y * cw + x - x0) * 4 + k] - whole[(y * W + x) * 4 + k]));
+  assert(worst <= 3, `Licht: Ausschnitt und Gesamtbild stimmen überein (max. Abweichung ${worst})`);
+}
+
 for (const [k, v] of Object.entries(results)) fs.writeFileSync(path.join(out, k + ".rgba"), v);
 fs.writeFileSync(path.join(out, "meta.json"), JSON.stringify({ w: W, h: H, names: Object.keys(results) }));
 console.log("geschrieben nach", out);

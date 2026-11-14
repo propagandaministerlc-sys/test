@@ -214,6 +214,25 @@ const alphaAt = (l, x, y) => (l.canvas ? l.canvas[(y * DW + x) * 4 + 3] : 0);
   assert(doc.layers.length === 3 && !doc.layers.includes(paintL), "Live: Moduswechsel legt neues Ebenenpaar an");
   await ps.stopLive();
   assert(!ps.isLive() && doc.layers.length === 2, "Live: Beenden entfernt die Malebene");
+
+  // ---------- Automatik ----------
+  doc.layers = [];
+  const PA = Object.assign({}, P, { auto: true });
+  const amsgs = [];
+  await ps.startLive("paint", () => PA, (t, err) => amsgs.push([t, err]));
+  const ap = doc.layers[0];
+  const ar = doc.layers[1];
+  strokeOn(ap, { left: 200, top: 300, right: 500, bottom: 340 }, [220, 30, 30, 255]); // 40 px breiter Strich
+  await ps._tick();
+  assert(!amsgs.some((m) => m[1]) && alphaAt(ar, 350, 320) > 200, "Automatik (Live): Strich übernommen");
+  const am = /Pinsel ≈ (\d+) px, Faltengröße (\d+) px/.exec(amsgs[amsgs.length - 1][0]);
+  assert(am && Number(am[1]) >= 30 && Number(am[1]) <= 50 && Number(am[2]) >= 2, "Automatik (Live): Pinselbreite gemessen: " + (am && am[0]));
+  await ps.stopLive();
+  const ml = makeLayer("Malebene", { left: 300, top: 200, right: 500, bottom: 320 }, [220, 30, 30, 255]);
+  doc.layers.unshift(ml);
+  doc.activeLayers = [ml];
+  const ai = await ps.apply("recolor", Object.assign({}, PA, { megapixels: 16 }));
+  assert(ai.auto && ai.auto.brush > 60 && ai.auto.scale >= 1.5 && alphaAt(doc.layers[0], 400, 260) > 240, "Automatik (manuell): Werte aus dem Strich abgeleitet");
   console.log("alle Prüfungen bestanden");
 })().catch((e) => {
   console.error(e);

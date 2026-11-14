@@ -481,20 +481,12 @@
     const cr = blur(plane(P, n, 0), w, h, R);
     const cg = blur(plane(P, n, 1), w, h, R);
     const cb = blur(plane(P, n, 2), w, h, R);
+    const Aw = blur(a0, w, h, R * 1.6); // breitere Maske: Verhältnis A/Aw ist unabhängig von der Strichgröße
     const Sh = blur(Y, w, h, Math.max(2, an.sigma * 4));
-    let maxA = 0;
-    let maxA0 = 0;
-    let meanSh = 0;
-    for (let i = 0; i < n; i++) {
-      if (A[i] > maxA) maxA = A[i];
-      if (a0[i] > maxA0) maxA0 = a0[i];
-      meanSh += Sh[i];
-    }
-    meanSh /= n;
     const out = new Uint8Array(n * 4);
-    if (maxA <= 0) return out;
+    // Alle Größen sind bewusst lokal (keine Maxima/Mittelwerte über den Ausschnitt): So liefert die
+    // Berechnung in überlappenden Teilbereichen dasselbe Ergebnis und es entstehen keine Nähte.
     // Richtung zur Lichtquelle = Gradient der weichen Lichtmaske (zeigt zur Strichmitte)
-    let maxG = 1e-9;
     const dxA = new Float32Array(n);
     const dyA = new Float32Array(n);
     for (let y = 0; y < h; y++) {
@@ -504,24 +496,31 @@
         const i = y * w + x;
         const dx = A[y * w + (x < w - 1 ? x + 1 : x)] - A[y * w + (x > 0 ? x - 1 : x)];
         const dy = A[y1 + x] - A[y0 + x];
-        dxA[i] = dx;
-        dyA[i] = dy;
-        const m = dx * dx + dy * dy;
-        if (m > maxG) maxG = m;
+        dxA[i] = dx * 0.5;
+        dyA[i] = dy * 0.5;
       }
     }
-    const ig = 1 / Math.sqrt(maxG);
     const height = clamp(opts.height == null ? 0.5 : opts.height, 0, 1);
     const kxy = 1.5 * (1 - 0.8 * height);
     const hz = 0.25 + height;
     const rel = 2.5 * (opts.relief == null ? 0.6 : opts.relief);
     const inten = opts.intensity == null ? 1 : opts.intensity;
-    const aNorm = 1 / (0.6 * maxA);
     for (let i = 0, j = 0, b = 0; i < n; i++, j += 4, b += comps) {
-      const al = Math.min(1, A[i] * aNorm) * maxA0;
+      // Deckkraft des Lichts: voll in großen gemalten Flächen UND in der Mitte kleiner Kleckse
+      const al = Aw[i] > 1e-5 ? Math.max(1 - Math.exp(-A[i] * 8), Math.min(1, A[i] / (Aw[i] * 2.2))) * Math.min(1, Aw[i] * 400) : 0;
       if (al < 1 / 510) continue;
-      let lx = dxA[i] * ig * kxy;
-      let ly = dyA[i] * ig * kxy;
+      // normierte Richtung: Betrag ~ Abstand zur Strichmitte in Einheiten der Ausbreitung
+      const ig = R / (A[i] + 1e-4);
+      let lx = dxA[i] * ig;
+      let ly = dyA[i] * ig;
+      const lm = lx * lx + ly * ly;
+      if (lm > 1) {
+        const q = 1 / Math.sqrt(lm);
+        lx *= q;
+        ly *= q;
+      }
+      lx *= kxy;
+      ly *= kxy;
       const ll = 1 / Math.sqrt(lx * lx + ly * ly + hz * hz);
       lx *= ll;
       ly *= ll;
@@ -531,7 +530,7 @@
       const nl = 1 / Math.sqrt(nx * nx + ny * ny + 1);
       const f = clamp(((nx * lx + ny * ly + lz) * nl) / lz, 0, 3);
       // Schatten etwas stärker aufhellen als reine Multiplikation (grobe Albedo-Schätzung)
-      const lift = Math.sqrt((meanSh + 0.01) / (Sh[i] + 0.01));
+      const lift = clamp(Math.sqrt(0.19 / (Sh[i] + 0.01)), 0.7, 3);
       const ia = 1 / A[i];
       const g = inten * f;
       const r0 = TO_LIN[base[b]];
@@ -624,5 +623,35 @@
     }
   }
 
-  return { analyze, flowField, paint, recolor, light, decompose, blit, blur, guided };
+  /** Mittlere Strichbreite in Pixeln, geschätzt aus Fläche und Umfang der gemalten Pixel. */
+  function strokeWidth(rgba, w, h) {
+    let area = 0;
+    let per = 0;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = (y * w + x) * 4 + 3;
+        if (rgba[i] < 128) continue;
+        area++;
+        if (x === 0 || y === 0 || x === w - 1 || y === h - 1 || rgba[i - 4] < 128 || rgba[i + 4] < 128 || rgba[i - w * 4] < 128 || rgba[i + w * 4] < 128) per++;
+      }
+    }
+    return per > 0 ? Math.max(2, (2 * area) / per) : 0;
+  }
+
+  /** Wählt aus mehreren Faltengrößen die, bei der das Bild das stärkste Relief zeigt. */
+  function pickScale(base, w, h, comps, candidates) {
+    let best = candidates[0];
+    let bestE = -1;
+    for (const c of candidates) {
+      const sg = Math.max(1, c);
+      const e = sg / (3 * analyze(base, w, h, comps, sg).norm);
+      if (e > bestE) {
+        bestE = e;
+        best = sg;
+      }
+    }
+    return best;
+  }
+
+  return { analyze, flowField, paint, recolor, light, decompose, blit, blur, guided, strokeWidth, pickScale };
 });
