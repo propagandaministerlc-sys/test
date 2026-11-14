@@ -52,6 +52,8 @@ Das Bild unter den Strichen wird beim Start einmal eingelesen. Wer danach das Fo
 
 ### Regler
 
+Die Längen-Regler (Wölbung, Faltenfluss, Kanten-Fang, Ausbreitung, Faltengröße) beziehen sich auf ein Bild mit 1500 px langer Seite und wachsen automatisch mit der Bildgröße.
+
 - **Faltengröße** – wie groß die Strukturen sind, denen gefolgt wird (klein = feine Knitter, groß = große Falten).
 - **Max. Rechenauflösung** – große Bereiche werden intern verkleinert gerechnet; höher = mehr Detail, langsamer, mehr Speicher.
 - *Pinsel:* **Wölbung** (Verformung über das Relief), **Faltenfluss** (Verlaufen entlang der Falten), **Schatten übernehmen**.

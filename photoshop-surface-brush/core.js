@@ -401,7 +401,10 @@
       const a = P[j + 3];
       if (a < 1 / 510) continue;
       const ia = 1 / a;
-      shadeOut(out, j, P[j] * ia, P[j + 1] * ia, P[j + 2] * ia, a, Y[i] / ref[i], shade, 0.5);
+      // leichter Glanz auf den hellen Stellen der Oberfläche, damit auch dunkle Farbe die Form zeigt
+      const sr = Y[i] / ref[i];
+      const sheen = 0.1 * shade * clamp(sr - 1, 0, 2);
+      shadeOut(out, j, P[j] * ia + sheen, P[j + 1] * ia + sheen, P[j + 2] * ia + sheen, a, sr, shade, 0.5);
     }
     return out;
   }

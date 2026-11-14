@@ -16,6 +16,7 @@ const doc = {
   width: DW,
   height: DH,
   mode: "RGBColorMode",
+  activeHistoryState: { id: 1 },
   bitsPerChannel: BITS === 16 ? "bitDepth16" : "bitDepth8",
   colorProfileName: "sRGB IEC61966-2.1",
   layers: [],
@@ -187,7 +188,13 @@ const alphaAt = (l, x, y) => (l.canvas ? l.canvas[(y * DW + x) * 4 + 3] : 0);
   const strokeOn = (l, b, c) => {
     l.bounds = b;
     l.fill = c;
+    doc.activeHistoryState = { id: (doc.activeHistoryState ? doc.activeHistoryState.id : 0) + 1 }; // Strich fertig
   };
+  // Mitten im Strich (Ebene hat schon Pixel, aber kein neuer Protokollschritt): nicht eingreifen
+  paintL.bounds = { left: 100, top: 100, right: 130, bottom: 130 };
+  paintL.fill = [30, 60, 220, 255];
+  await ps._tick();
+  assert(paintL.fill !== null && !resL.pixels, "Live: kein Eingriff mitten im Strich");
   strokeOn(paintL, { left: 100, top: 100, right: 220, bottom: 140 }, [30, 60, 220, 255]);
   await ps._tick();
   assert(resL.pixels && alphaAt(resL, 160, 120) > 240, "Live: erster Strich im Ergebnis");

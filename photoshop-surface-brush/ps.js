@@ -259,6 +259,26 @@ async function selectLayer(layer) {
   }
 }
 
+/**
+ * Pixel-Regler gelten für ein Bild mit 1500 px langer Seite und wachsen mit der Bildgröße,
+ * damit die Wirkung in großen Fotos nicht verschwindet.
+ */
+function docParams(p, W, H) {
+  const k = Math.max(1, Math.max(W, H) / 1500);
+  const q = Object.assign({}, p);
+  for (const key of ["wrap", "follow", "snap", "radius", "scale"]) if (q[key] != null) q[key] = q[key] * k;
+  return q;
+}
+
+function histId(doc) {
+  try {
+    const h = doc.activeHistoryState;
+    return h && h.id != null ? h.id : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 function workSize(W, H, megapixels) {
   const s = Math.min(1, Math.sqrt((megapixels * 1e6) / (W * H)));
   return { s, tw: Math.max(1, Math.round(W * s)), th: Math.max(1, Math.round(H * s)) };
@@ -304,6 +324,7 @@ async function apply(mode, p) {
 
   const dw = doc.width;
   const dh = doc.height;
+  p = docParams(p, dw, dh);
   const b = layer.bounds;
   const lb = {
     left: Math.max(0, Math.floor(b.left)),
@@ -368,6 +389,7 @@ async function decompose(p) {
   const doc = activeDoc();
   const W = doc.width;
   const H = doc.height;
+  p = docParams(p, W, H);
   const region = { left: 0, top: 0, right: W, bottom: H };
   const { s, tw, th } = workSize(W, H, p.megapixels);
   await withHistory(doc, "Surface Brush: Zerlegung", async () => {
@@ -479,10 +501,13 @@ async function createLivePair(st, doc) {
   }
 }
 
-async function liveTick(st) {
+async function liveTick(st, fromEvent) {
   if (live !== st || st.busy) return;
   const doc = app.activeDocument;
   if (!doc || doc.id !== st.docId) return;
+  // Nur nach einem abgeschlossenen Strich eingreifen (neuer Protokollschritt) – niemals mitten im Malen.
+  const hid = histId(doc);
+  if (hid === null ? !fromEvent : hid === st.lastHist) return;
   const paint = findLayer(doc.layers, st.paintId);
   const result = findLayer(doc.layers, st.resultId);
   if (!paint || !result) {
@@ -546,6 +571,7 @@ async function liveTick(st) {
       st.onStatus("Live-Modus beendet. Fehler: " + (e && e.message ? e.message : String(e)), true);
     }
   } finally {
+    st.lastHist = histId(doc);
     st.busy = false;
   }
 }
@@ -558,7 +584,8 @@ async function startLive(mode, getParams, onStatus) {
   const H = doc.height;
   if (W * H > 60e6) throw new UserError("Das Dokument ist für den Live-Modus zu groß (über 60 Megapixel).");
   const st = {
-    docId: doc.id, W, H, mode, getParams, onStatus,
+    docId: doc.id, W, H, mode, onStatus, lastHist: null,
+    getParams: () => docParams(getParams(), W, H),
     base: new Uint8Array(W * H * 3), accum: new Uint8Array(W * H * 4),
     undo: [], busy: true, norm: 0, normScale: -1, resultId: null, paintId: null, timer: null, listener: null,
   };
@@ -568,11 +595,12 @@ async function startLive(mode, getParams, onStatus) {
     await step("Schreibtest", () => ensureWriter(doc));
     await createLivePair(st, doc);
   });
-  computeNorm(st, getParams().scale);
+  computeNorm(st, st.getParams().scale);
+  st.lastHist = histId(doc);
   st.busy = false;
   live = st;
   st.listener = () => {
-    liveTick(st);
+    liveTick(st, true);
   };
   try {
     action.addNotificationListener(["historyStateChanged"], st.listener);
@@ -580,7 +608,7 @@ async function startLive(mode, getParams, onStatus) {
     st.listener = null;
   }
   // Zusätzlich regelmäßig prüfen, falls das Ereignis ausbleibt
-  st.timer = setInterval(() => liveTick(st), 400);
+  st.timer = setInterval(() => liveTick(st, false), 300);
 }
 
 async function stopLive() {
@@ -621,6 +649,7 @@ async function setLiveMode(mode) {
       await createLivePair(st, doc);
     });
   } finally {
+    st.lastHist = histId(doc);
     st.busy = false;
   }
 }
@@ -639,6 +668,7 @@ async function undoLive() {
     pasteBuf(st.accum, st.W, 4, u.rect, u.data);
     await withHistory(doc, "Surface Brush: Strich zurück", () => renderRegion(st, doc, result, u.rect));
   } finally {
+    st.lastHist = histId(doc);
     st.busy = false;
   }
 }
@@ -647,4 +677,4 @@ function isLive() {
   return !!live;
 }
 
-module.exports = { apply, decompose, newStrokeLayer, UserError, startLive, stopLive, setLiveMode, undoLive, isLive, _tick: () => (live ? liveTick(live) : null) };
+module.exports = { apply, decompose, newStrokeLayer, UserError, startLive, stopLive, setLiveMode, undoLive, isLive, _tick: () => (live ? liveTick(live, true) : null) };
