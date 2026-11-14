@@ -389,6 +389,23 @@
           Q[o + 3] *= norm;
         }
       }
+      // Deckkraft wiederherstellen: Das Verlaufen soll die Form des Strichs ändern,
+      // ihn aber nicht zu einem blassen Schleier ausdünnen.
+      let mx = 0;
+      for (let j = 3; j < n * 4; j += 4) if (P[j] > mx) mx = P[j];
+      if (mx > 0) {
+        for (let j = 0; j < n * 4; j += 4) {
+          const a = Q[j + 3];
+          if (a <= 0) continue;
+          const t = clamp((a / mx - 0.22) / 0.5, 0, 1);
+          const na = t * t * (3 - 2 * t) * mx;
+          const f = na / a;
+          Q[j] *= f;
+          Q[j + 1] *= f;
+          Q[j + 2] *= f;
+          Q[j + 3] = na;
+        }
+      }
       P = Q;
     }
 
