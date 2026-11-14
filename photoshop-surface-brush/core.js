@@ -116,7 +116,7 @@
    * @param base   Uint8Array, comps Kanäle pro Pixel (3 oder 4)
    * @param sigma  Relief-Skala in Pixeln (Größe der Falten)
    */
-  function analyze(base, w, h, comps, sigma) {
+  function analyze(base, w, h, comps, sigma, norm) {
     const n = w * h;
     const Y = new Float32Array(n);
     const Yp = new Float32Array(n);
@@ -144,7 +144,8 @@
       }
     }
     // Gradienten auf ~[-1,1] normieren, damit Regler unabhängig vom Kontrast wirken.
-    const k = 1 / ((3 * sum) / n + 1e-6);
+    // norm: fest vorgegebene Normierung (für Ausschnitte, damit alle Striche gleich stark wirken)
+    const k = norm > 0 ? norm : 1 / ((3 * sum) / n + 1e-6);
     for (let i = 0; i < n; i++) {
       let dx = gx[i] * k;
       let dy = gy[i] * k;
@@ -157,7 +158,7 @@
       gx[i] = dx;
       gy[i] = dy;
     }
-    return { w, h, base, comps, sigma, Y, Yp, gx, gy, flow: null };
+    return { w, h, base, comps, sigma, Y, Yp, gx, gy, norm: k, flow: null };
   }
 
   /** Tangentenfeld (Richtung entlang der Falten) + Kohärenz. */

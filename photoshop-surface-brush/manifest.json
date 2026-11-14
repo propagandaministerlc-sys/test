@@ -1,7 +1,7 @@
 {
   "id": "com.surfacebrush.photoshop",
   "name": "Surface Brush",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "main": "index.html",
   "manifestVersion": 5,
   "host": {

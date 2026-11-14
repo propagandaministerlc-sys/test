@@ -35,6 +35,17 @@ function setMode(m) {
     g.className = !f || f === m ? "group" : "group hidden";
   });
   $("hint").textContent = HINTS[m];
+  if (ps.isLive()) {
+    ps.setLiveMode(m).catch((e) => status("Fehler: " + (e && e.message ? e.message : String(e)), true));
+  }
+}
+
+function updateLiveButton() {
+  $("live").textContent = ps.isLive() ? "Live-Modus beenden" : "Live-Modus starten";
+}
+function liveStatus(text, isError) {
+  status(text, isError);
+  updateLiveButton();
 }
 
 function params() {
@@ -53,6 +64,10 @@ function params() {
   });
 }
 
+function liveParams() {
+  return params();
+}
+
 async function run(label, fn) {
   if (busy) return;
   busy = true;
@@ -66,7 +81,9 @@ async function run(label, fn) {
     if (info && info.scale < 0.999) {
       msg += " Mit " + Math.round(info.scale * 100) + " % Auflösung gerechnet – für mehr Details »Max. Rechenauflösung« erhöhen.";
     }
-    if (info) msg += " Regler ändern und erneut »Anwenden« ersetzt das Ergebnis.";
+    if (info === "live") msg = ps.isLive() ? "Live-Modus läuft: Einfach mit dem Pinsel malen – jeder Strich wird beim Loslassen übernommen." : "Live-Modus beendet.";
+    else if (info === "undo") msg = "Letzter Strich zurückgenommen.";
+    else if (info) msg += " Regler ändern und erneut »Anwenden« ersetzt das Ergebnis.";
     status(msg);
   } catch (e) {
     const text = e instanceof ps.UserError ? e.message : "Fehler: " + (e && e.message ? e.message : String(e));
@@ -74,6 +91,7 @@ async function run(label, fn) {
     if (!(e instanceof ps.UserError)) console.error(e);
   } finally {
     busy = false;
+    updateLiveButton();
   }
 }
 
@@ -85,6 +103,19 @@ function init() {
     run("Lege Malebene an", async () => {
       await ps.newStrokeLayer();
       return null;
+    })
+  );
+  $("live").addEventListener("click", () =>
+    run(ps.isLive() ? "Beende Live-Modus" : "Starte Live-Modus", async () => {
+      if (ps.isLive()) await ps.stopLive();
+      else await ps.startLive(mode, liveParams, liveStatus);
+      return "live";
+    })
+  );
+  $("liveUndo").addEventListener("click", () =>
+    run("Nehme Strich zurück", async () => {
+      await ps.undoLive();
+      return "undo";
     })
   );
   $("apply").addEventListener("click", () => run("Berechne", () => ps.apply(mode, params())));

@@ -73,7 +73,17 @@ const imaging = {
   },
   async putPixels(o) {
     const l = doc.layers.find((x) => x.id === o.layerID);
+    if (l.fill && !o.imageData.buf.some((v) => v)) {
+      // Leeren der Malebene: wie in Photoshop schrumpfen die Grenzen auf null
+      l.fill = null;
+      l.bounds = { left: 0, top: 0, right: 0, bottom: 0 };
+      return;
+    }
     l.pixels = { data: o.imageData.buf, w: o.imageData.o.width, h: o.imageData.o.height, left: o.targetBounds.left, top: o.targetBounds.top };
+    // wie Photoshop: nur das geschriebene Rechteck ändert sich, der Rest der Ebene bleibt
+    if (!l.canvas) l.canvas = new Uint8Array(DW * DH * 4);
+    const q = l.pixels;
+    for (let y = 0; y < q.h; y++) l.canvas.set(q.data.subarray(y * q.w * 4, (y + 1) * q.w * 4), ((q.top + y) * DW + q.left) * 4);
   },
 };
 
@@ -84,7 +94,7 @@ const photoshop = {
       fn({ hostControl: { suspendHistory: async () => 1, resumeHistory: async () => {} } }),
   },
   imaging,
-  action: { batchPlay: async () => [] },
+  action: { batchPlay: async () => [], addNotificationListener() {}, removeNotificationListener() {} },
   constants: {
     DocumentMode: { RGB: "RGBColorMode" },
     LayerKind: { NORMAL: "pixel" },
@@ -103,13 +113,7 @@ const assert = (c, m) => {
   if (!c) throw new Error("FEHLER: " + m);
   console.log("ok  ", m);
 };
-const alphaAt = (l, x, y) => {
-  const p = l.pixels;
-  const lx = x - p.left;
-  const ly = y - p.top;
-  if (lx < 0 || ly < 0 || lx >= p.w || ly >= p.h) return 0;
-  return p.data[(ly * p.w + lx) * 4 + 3];
-};
+const alphaAt = (l, x, y) => (l.canvas ? l.canvas[(y * DW + x) * 4 + 3] : 0);
 
 (async () => {
   // Malebene: rotes Rechteck 300..500 × 200..320
@@ -152,6 +156,37 @@ const alphaAt = (l, x, y) => {
     msg = e instanceof ps.UserError ? e.message : "";
   }
   assert(/leer/.test(msg), "leere Malebene ergibt verständliche Meldung");
+  // ---------- Live-Modus ----------
+  doc.layers = [];
+  const P = { scale: 5, megapixels: 3, snap: 0, shade: 1, highlights: 0.5, wrap: 6, follow: 6, radius: 30, intensity: 1, height: 0.4, relief: 0.7 };
+  const msgs = [];
+  await ps.startLive("recolor", () => P, (t, err) => msgs.push([t, err]));
+  assert(ps.isLive() && doc.layers.length === 2, "Live: Ergebnis- und Malebene angelegt");
+  const paintL = doc.layers[0];
+  const resL = doc.layers[1];
+  const strokeOn = (l, b, c) => {
+    l.bounds = b;
+    l.fill = c;
+  };
+  strokeOn(paintL, { left: 100, top: 100, right: 220, bottom: 140 }, [30, 60, 220, 255]);
+  await ps._tick();
+  assert(resL.pixels && alphaAt(resL, 160, 120) > 240, "Live: erster Strich im Ergebnis");
+  assert(paintL.fill === null, "Live: Malebene nach dem Strich geleert");
+  assert(!msgs.some((m) => m[1]), "Live: keine Fehlermeldung");
+  // zweiter Strich weiter rechts: Ergebnis wird nur im betroffenen Bereich geschrieben
+  strokeOn(paintL, { left: 600, top: 400, right: 700, bottom: 430 }, [220, 30, 30, 255]);
+  await ps._tick();
+  assert(alphaAt(resL, 650, 415) > 240 && resL.pixels.left >= 560, "Live: zweiter Strich, nur Teilbereich neu geschrieben");
+  // überlappender Strich: der alte bleibt im Bereich erhalten (wird aus dem Gesamtstand neu berechnet)
+  strokeOn(paintL, { left: 680, top: 400, right: 760, bottom: 430 }, [30, 200, 30, 255]);
+  await ps._tick();
+  assert(alphaAt(resL, 650, 415) > 240 && alphaAt(resL, 740, 415) > 240, "Live: überlappende Striche bleiben beide erhalten");
+  await ps.undoLive();
+  assert(alphaAt(resL, 740, 415) < 40 && alphaAt(resL, 650, 415) > 240, "Live: »Strich zurück« entfernt nur den letzten");
+  await ps.setLiveMode("paint");
+  assert(doc.layers.length === 3 && !doc.layers.includes(paintL), "Live: Moduswechsel legt neues Ebenenpaar an");
+  await ps.stopLive();
+  assert(!ps.isLive() && doc.layers.length === 2, "Live: Beenden entfernt die Malebene");
   console.log("alle Prüfungen bestanden");
 })().catch((e) => {
   console.error(e);

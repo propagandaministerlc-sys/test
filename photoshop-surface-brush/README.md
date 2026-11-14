@@ -16,7 +16,7 @@ Ein UXP-Panel für Photoshop, das Malen und Bearbeiten an die **Form, Farbe und 
 ## Wichtig: Unterschiede zum Adobe-Original
 
 - **Keine KI.** Adobes Projekt nutzt ein trainiertes Modell, das Geometrie und Licht „versteht“. Dieses Plugin schätzt Relief und Beleuchtung klassisch aus den Helligkeiten des Bildes. Das funktioniert gut auf Stoff, Papier, Haut, Wänden – also Flächen, deren Helligkeitsverlauf von der Form kommt. Bei gemusterten oder bedruckten Flächen hält es das Muster fälschlich für Relief.
-- **Nicht live unter dem Pinsel.** Photoshop erlaubt Plugins nicht, in das Pinsel-Werkzeug einzugreifen. Deshalb malt man auf eine eigene Malebene und klickt dann »Anwenden«. Das Ergebnis ist eine neue Ebene; die Malebene bleibt (ausgeblendet) erhalten.
+- **Live heißt: pro Strich.** Photoshop erlaubt Plugins nicht, in das Pinsel-Werkzeug einzugreifen. Im Live-Modus sieht man deshalb während des Malens den normalen Strich; beim Loslassen wird er sofort auf die Oberfläche gelegt.
 - **Stand der Prüfung:** Die Algorithmen und der Ablauf sind automatisiert getestet (siehe unten), aber gegen eine nachgebaute Photoshop-Schnittstelle – in echtem Photoshop wurde das Plugin noch nicht ausgeführt.
 
 ## Installation
@@ -31,6 +31,18 @@ Voraussetzung: Photoshop **24.4 oder neuer** (2023+).
 6. In Photoshop erscheint das Panel (sonst: *Zusatzmodule › Surface Brush*).
 
 ## Bedienung
+
+### Live-Modus
+
+1. Bild öffnen (RGB), Modus wählen (Pinsel / Umfärben / Licht).
+2. **Live-Modus starten** – es werden eine Ergebnisebene und eine Live-Malebene angelegt, der Pinsel ist gewählt.
+3. Malen. Jeder Strich wird beim Loslassen übernommen; Regleränderungen gelten ab dem nächsten Strich.
+4. **Strich zurück** nimmt den letzten Strich zurück (Photoshops eigenes Rückgängig eignet sich im Live-Modus nicht, weil der Strich sofort wieder übernommen wird).
+5. Ein Moduswechsel beginnt eine neue Ergebnisebene. **Live-Modus beenden** entfernt die Malebene, das Ergebnis bleibt.
+
+Das Bild unter den Strichen wird beim Start einmal eingelesen. Wer danach das Foto selbst verändert, startet den Live-Modus neu.
+
+### Manuell
 
 1. Bild öffnen (RGB).
 2. Im Panel **1 · Neue Malebene** klicken – es wird eine leere Ebene angelegt und der Pinsel gewählt.

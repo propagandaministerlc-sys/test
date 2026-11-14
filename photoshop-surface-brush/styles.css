@@ -69,3 +69,9 @@ sp-slider {
   font-size: 10px;
   color: var(--uxp-host-text-color-secondary, #888);
 }
+.section {
+  margin-top: 10px;
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--uxp-host-text-color-secondary, #999);
+}

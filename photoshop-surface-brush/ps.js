@@ -316,4 +316,261 @@ async function decompose(p) {
   return { width: tw, height: th, scale: s };
 }
 
-module.exports = { apply, decompose, newStrokeLayer, UserError };
+// ====================== Live-Modus ======================
+// Jeder fertige Pinselstrich auf der Live-Malebene wird sofort übernommen: Der Strich wird
+// eingelesen, die Malebene geleert und das Ergebnis im betroffenen Bereich neu berechnet.
+
+let live = null;
+
+function cropBuf(src, SW, comps, r) {
+  const w = r.right - r.left;
+  const h = r.bottom - r.top;
+  const out = new Uint8Array(w * h * comps);
+  for (let y = 0; y < h; y++) {
+    const o = ((r.top + y) * SW + r.left) * comps;
+    out.set(src.subarray(o, o + w * comps), y * w * comps);
+  }
+  return out;
+}
+function pasteBuf(dst, SW, comps, r, data) {
+  const w = r.right - r.left;
+  const h = r.bottom - r.top;
+  for (let y = 0; y < h; y++) {
+    dst.set(data.subarray(y * w * comps, (y + 1) * w * comps), ((r.top + y) * SW + r.left) * comps);
+  }
+}
+function scaleBuf(src, w, h, comps, tw, th) {
+  if (w === tw && h === th) return src;
+  const out = new Uint8Array(tw * th * comps);
+  SC.blit(src, w, h, comps, out, tw, th, comps, 0, 0, tw, th);
+  return out;
+}
+function isModalBusy(e) {
+  const m = String((e && e.message) || e).toLowerCase();
+  return (e && e.number === 9) || m.indexOf("modal") >= 0;
+}
+function marginFor(mode, p) {
+  return Math.ceil(mode === "paint" ? p.wrap + p.follow + 8 : mode === "recolor" ? p.snap * 3 + 8 : p.radius * 3);
+}
+function modeOpts(mode, p, s) {
+  if (mode === "paint") return { wrap: p.wrap * s, follow: p.follow * s, shade: p.shade };
+  if (mode === "recolor") return { snap: p.snap * s, shade: p.shade, highlights: p.highlights };
+  return { radius: p.radius * s, intensity: p.intensity, height: p.height, relief: p.relief };
+}
+
+function computeNorm(st, scale) {
+  const d = Math.min(1, Math.sqrt(2e6 / (st.W * st.H)));
+  const dw = Math.max(1, Math.round(st.W * d));
+  const dh = Math.max(1, Math.round(st.H * d));
+  const an = SC.analyze(scaleBuf(st.base, st.W, st.H, 3, dw, dh), dw, dh, 3, Math.max(1, scale * d));
+  st.norm = an.norm / d;
+  st.normScale = scale;
+}
+
+/** Berechnet das Ergebnis für rect (+Rand) aus allen bisherigen Strichen neu und schreibt es. */
+async function renderRegion(st, doc, result, rect) {
+  const p = st.getParams();
+  if (st.normScale !== p.scale) computeNorm(st, p.scale);
+  const m = marginFor(st.mode, p);
+  const region = {
+    left: Math.max(0, rect.left - m),
+    top: Math.max(0, rect.top - m),
+    right: Math.min(st.W, rect.right + m),
+    bottom: Math.min(st.H, rect.bottom + m),
+  };
+  const W = region.right - region.left;
+  const H = region.bottom - region.top;
+  const { s, tw, th } = workSize(W, H, p.megapixels);
+  let out;
+  await step("Berechnung", async () => {
+    const base = scaleBuf(cropBuf(st.base, st.W, 3, region), W, H, 3, tw, th);
+    const stroke = scaleBuf(cropBuf(st.accum, st.W, 4, region), W, H, 4, tw, th);
+    const an = SC.analyze(base, tw, th, 3, Math.max(1, p.scale * s), st.norm * s);
+    out = upscale(SC[st.mode](an, stroke, modeOpts(st.mode, p, s)), tw, th, W, H);
+  });
+  await step("Ergebnis schreiben", () => putRGBA(doc, result.id, out, W, H, region.left, region.top));
+  return s;
+}
+
+async function createLivePair(st, doc) {
+  const r = await step("Ergebnisebene anlegen", () =>
+    doc.createLayer(constants.LayerKind.NORMAL, { name: "Live " + MODE_NAMES[st.mode] + " (Surface Brush)" })
+  );
+  const pl = await step("Malebene anlegen", () => doc.createLayer(constants.LayerKind.NORMAL, { name: "Live-" + STROKE_LAYER_NAME }));
+  st.resultId = r.id;
+  st.paintId = pl.id;
+  try {
+    await action.batchPlay([{ _obj: "select", _target: [{ _ref: "paintbrushTool" }] }], {});
+  } catch (e) {
+    /* nicht kritisch */
+  }
+}
+
+async function liveTick(st) {
+  if (live !== st || st.busy) return;
+  const doc = app.activeDocument;
+  if (!doc || doc.id !== st.docId) return;
+  const paint = findLayer(doc.layers, st.paintId);
+  const result = findLayer(doc.layers, st.resultId);
+  if (!paint || !result) {
+    await stopLive();
+    st.onStatus("Live-Modus beendet: Die Live-Ebenen wurden gelöscht.", true);
+    return;
+  }
+  const b = paint.bounds;
+  const lb = {
+    left: Math.max(0, Math.floor(b.left)),
+    top: Math.max(0, Math.floor(b.top)),
+    right: Math.min(st.W, Math.ceil(b.right)),
+    bottom: Math.min(st.H, Math.ceil(b.bottom)),
+  };
+  if (lb.right <= lb.left || lb.bottom <= lb.top) return;
+  st.busy = true;
+  const t0 = Date.now();
+  try {
+    let scale = null;
+    await withHistory(doc, "Surface Brush: Strich", async () => {
+      const w = lb.right - lb.left;
+      const h = lb.bottom - lb.top;
+      const ns = new Uint8Array(w * h * 4);
+      await step("Strich lesen", () => readInto(ns, w, h, 4, lb, lb, doc, paint.id));
+      let any = false;
+      for (let i = 3; i < ns.length; i += 4) {
+        if (ns[i]) {
+          any = true;
+          break;
+        }
+      }
+      if (!any) return;
+      const prev = cropBuf(st.accum, st.W, 4, lb);
+      st.undo.push({ rect: lb, data: prev });
+      if (st.undo.length > 20) st.undo.shift();
+      // neuen Strich über die bisherigen legen
+      const merged = new Uint8Array(prev);
+      for (let i = 0; i < ns.length; i += 4) {
+        const a = ns[i + 3] / 255;
+        if (a === 0) continue;
+        const pa = merged[i + 3] / 255;
+        const oa = a + pa * (1 - a);
+        for (let k = 0; k < 3; k++) merged[i + k] = Math.round((ns[i + k] * a + merged[i + k] * pa * (1 - a)) / oa);
+        merged[i + 3] = Math.round(oa * 255);
+      }
+      pasteBuf(st.accum, st.W, 4, lb, merged);
+      // Malebene leeren (der rohe Strich wird durch das Ergebnis ersetzt)
+      await step("Malebene leeren", () => putRGBA(doc, paint.id, new Uint8Array(w * h * 4), w, h, lb.left, lb.top));
+      scale = await renderRegion(st, doc, result, lb);
+    });
+    if (scale !== null) {
+      st.onStatus(
+        "Live: Strich übernommen (" + ((Date.now() - t0) / 1000).toFixed(1) + " s)" +
+          (scale < 0.999 ? ", mit " + Math.round(scale * 100) + " % Auflösung gerechnet." : "."),
+        false
+      );
+    }
+  } catch (e) {
+    if (!isModalBusy(e)) {
+      await stopLive();
+      st.onStatus("Live-Modus beendet. Fehler: " + (e && e.message ? e.message : String(e)), true);
+    }
+  } finally {
+    st.busy = false;
+  }
+}
+
+/** Startet den Live-Modus im aktiven Dokument. */
+async function startLive(mode, getParams, onStatus) {
+  if (live) await stopLive();
+  const doc = activeDoc();
+  const W = doc.width;
+  const H = doc.height;
+  if (W * H > 60e6) throw new UserError("Das Dokument ist für den Live-Modus zu groß (über 60 Megapixel).");
+  const st = {
+    docId: doc.id, W, H, mode, getParams, onStatus,
+    base: new Uint8Array(W * H * 3), accum: new Uint8Array(W * H * 4),
+    undo: [], busy: true, norm: 0, normScale: -1, resultId: null, paintId: null, timer: null, listener: null,
+  };
+  const full = { left: 0, top: 0, right: W, bottom: H };
+  await withHistory(doc, "Surface Brush: Live starten", async () => {
+    await step("Bild lesen", () => readInto(st.base, W, H, 3, full, full, doc, null));
+    await createLivePair(st, doc);
+  });
+  computeNorm(st, getParams().scale);
+  st.busy = false;
+  live = st;
+  st.listener = () => {
+    liveTick(st);
+  };
+  try {
+    action.addNotificationListener(["historyStateChanged"], st.listener);
+  } catch (e) {
+    st.listener = null;
+  }
+  // Zusätzlich regelmäßig prüfen, falls das Ereignis ausbleibt
+  st.timer = setInterval(() => liveTick(st), 400);
+}
+
+async function stopLive() {
+  const st = live;
+  if (!st) return;
+  live = null;
+  if (st.timer) clearInterval(st.timer);
+  if (st.listener) {
+    try {
+      action.removeNotificationListener(["historyStateChanged"], st.listener);
+    } catch (e) {
+      /* ignorieren */
+    }
+  }
+  try {
+    const doc = app.activeDocument;
+    const paint = doc && doc.id === st.docId ? findLayer(doc.layers, st.paintId) : null;
+    if (paint) await withHistory(doc, "Surface Brush: Live beenden", () => paint.delete());
+  } catch (e) {
+    /* Malebene bleibt dann einfach stehen */
+  }
+}
+
+/** Moduswechsel im Live-Modus: neues Ebenenpaar, bisheriges Ergebnis bleibt als Ebene erhalten. */
+async function setLiveMode(mode) {
+  const st = live;
+  if (!st || st.mode === mode) return;
+  const doc = app.activeDocument;
+  if (!doc || doc.id !== st.docId) return;
+  st.busy = true;
+  try {
+    await withHistory(doc, "Surface Brush: Moduswechsel", async () => {
+      const paint = findLayer(doc.layers, st.paintId);
+      if (paint) await paint.delete();
+      st.mode = mode;
+      st.accum = new Uint8Array(st.W * st.H * 4);
+      st.undo = [];
+      await createLivePair(st, doc);
+    });
+  } finally {
+    st.busy = false;
+  }
+}
+
+/** Nimmt den letzten Live-Strich zurück. */
+async function undoLive() {
+  const st = live;
+  if (!st) throw new UserError("Der Live-Modus läuft nicht.");
+  if (!st.undo.length) throw new UserError("Kein Strich zum Zurücknehmen.");
+  const doc = app.activeDocument;
+  const result = doc && doc.id === st.docId ? findLayer(doc.layers, st.resultId) : null;
+  if (!result) throw new UserError("Die Live-Ergebnisebene wurde nicht gefunden.");
+  st.busy = true;
+  try {
+    const u = st.undo.pop();
+    pasteBuf(st.accum, st.W, 4, u.rect, u.data);
+    await withHistory(doc, "Surface Brush: Strich zurück", () => renderRegion(st, doc, result, u.rect));
+  } finally {
+    st.busy = false;
+  }
+}
+
+function isLive() {
+  return !!live;
+}
+
+module.exports = { apply, decompose, newStrokeLayer, UserError, startLive, stopLive, setLiveMode, undoLive, isLive, _tick: () => (live ? liveTick(live) : null) };

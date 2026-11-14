@@ -38,15 +38,21 @@
     <sp-slider id="quality" min="1" max="16" value="3"><sp-label slot="label">Max. Rechenauflösung (Megapixel)</sp-label></sp-slider>
   </div>
 
+  <div class="section">Live</div>
+  <div class="buttons">
+    <sp-button id="live" variant="cta">Live-Modus starten</sp-button>
+    <sp-button id="liveUndo" variant="secondary">Strich zurück</sp-button>
+  </div>
+  <div class="section">Manuell</div>
   <div class="buttons">
     <sp-button id="newLayer" variant="secondary">1 · Neue Malebene</sp-button>
-    <sp-button id="apply" variant="cta">2 · Anwenden</sp-button>
+    <sp-button id="apply" variant="primary">2 · Anwenden</sp-button>
   </div>
   <div class="buttons">
     <sp-action-button id="decompose">Bild in Albedo / Schattierung / Normalen zerlegen</sp-action-button>
   </div>
 
   <div class="status" id="status"></div>
-  <div class="version">Version 1.0.1</div>
+  <div class="version">Version 1.1.0</div>
 </body>
 </html>
