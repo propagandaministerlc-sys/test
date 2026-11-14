@@ -273,7 +273,11 @@
 
   /** Farbe (linear) * Schattierung -> sRGB, mit weichem Erhalt der Glanzlichter. */
   function shadeOut(out, j, r, g, b, a, s, shade, hl) {
-    const f = shade > 0 ? Math.pow(clamp(s, 0.02, 6), shade) : 1;
+    // Weiche Untergrenze: Sehr dunkle Stellen sind meist dunkles Material (Haare, Augenbrauen)
+    // und kein Schatten – dort soll die Farbe nicht schwarz werden.
+    const s2 = s * s;
+    const sf = Math.sqrt(Math.sqrt(s2 * s2 + 0.0081)); // geht für kleine s gegen 0.3
+    const f = shade > 0 ? Math.pow(clamp(sf, 0.02, 6), shade) : 1;
     r *= f;
     g *= f;
     b *= f;
