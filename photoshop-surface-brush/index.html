@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="styles.css" />
+  <script src="main.js"></script>
+</head>
+<body>
+  <div class="tabs">
+    <div class="tab active" data-mode="paint">Pinsel</div>
+    <div class="tab" data-mode="recolor">Umfärben</div>
+    <div class="tab" data-mode="light">Licht</div>
+  </div>
+
+  <div class="hint" id="hint"></div>
+
+  <div class="group" data-for="paint">
+    <sp-slider id="wrap" min="0" max="60" value="14"><sp-label slot="label">Wölbung (px)</sp-label></sp-slider>
+    <sp-slider id="follow" min="0" max="60" value="16"><sp-label slot="label">Faltenfluss (px)</sp-label></sp-slider>
+    <sp-slider id="paintShade" min="0" max="100" value="90"><sp-label slot="label">Schatten übernehmen (%)</sp-label></sp-slider>
+  </div>
+
+  <div class="group" data-for="recolor">
+    <sp-slider id="snap" min="0" max="40" value="8"><sp-label slot="label">Kanten-Fang (px)</sp-label></sp-slider>
+    <sp-slider id="recShade" min="0" max="100" value="100"><sp-label slot="label">Schatten erhalten (%)</sp-label></sp-slider>
+    <sp-slider id="highlights" min="0" max="100" value="50"><sp-label slot="label">Glanzlichter (%)</sp-label></sp-slider>
+  </div>
+
+  <div class="group" data-for="light">
+    <sp-slider id="radius" min="5" max="400" value="80"><sp-label slot="label">Ausbreitung (px)</sp-label></sp-slider>
+    <sp-slider id="intensity" min="0" max="300" value="120"><sp-label slot="label">Intensität (%)</sp-label></sp-slider>
+    <sp-slider id="height" min="0" max="100" value="40"><sp-label slot="label">Höhe der Lichtquelle (%)</sp-label></sp-slider>
+    <sp-slider id="relief" min="0" max="100" value="70"><sp-label slot="label">Relief-Wirkung (%)</sp-label></sp-slider>
+  </div>
+
+  <div class="group">
+    <sp-slider id="scale" min="1" max="30" value="5"><sp-label slot="label">Faltengröße (px)</sp-label></sp-slider>
+    <sp-slider id="quality" min="1" max="16" value="3"><sp-label slot="label">Max. Rechenauflösung (Megapixel)</sp-label></sp-slider>
+  </div>
+
+  <div class="buttons">
+    <sp-button id="newLayer" variant="secondary">1 · Neue Malebene</sp-button>
+    <sp-button id="apply" variant="cta">2 · Anwenden</sp-button>
+  </div>
+  <div class="buttons">
+    <sp-action-button id="decompose">Bild in Albedo / Schattierung / Normalen zerlegen</sp-action-button>
+  </div>
+
+  <div class="status" id="status"></div>
+</body>
+</html>
