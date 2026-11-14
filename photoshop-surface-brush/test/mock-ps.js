@@ -33,6 +33,7 @@ const doc = {
 const imaging = {
   async getPixels(req) {
     calls.push(req);
+    if (req.applyAlpha) throw new Error("applyAlpha abgelehnt (Attrappe)"); // Rückfall muss greifen
     let sb = req.sourceBounds;
     let comps = 3;
     let color = (x, y) => {

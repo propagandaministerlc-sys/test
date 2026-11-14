@@ -62,6 +62,52 @@ async function withHistory(doc, name, fn) {
  * Liest ein Rechteck (Dokument-Komposit oder einzelne Ebene) und passt es in den
  * Arbeits-Puffer dst (tw×th, comps Kanäle) ein, der das Dokument-Rechteck region abdeckt.
  */
+/** Führt einen Schritt aus und nennt ihn in der Fehlermeldung, damit Fehler eingrenzbar sind. */
+async function step(name, fn) {
+  try {
+    return await fn();
+  } catch (e) {
+    if (e instanceof UserError) throw e;
+    throw new Error("[" + name + "] " + (e && e.message ? e.message : String(e)));
+  }
+}
+
+/** Beliebige Pixeldaten (8/16/32 Bit) nach 8 Bit wandeln. */
+function to8bit(data) {
+  if (data instanceof Uint8Array) return data;
+  const out = new Uint8Array(data.length);
+  if (data instanceof Uint16Array) {
+    for (let i = 0; i < data.length; i++) out[i] = Math.min(255, (data[i] * 255 + 16384) >> 15);
+  } else {
+    for (let i = 0; i < data.length; i++) out[i] = Math.max(0, Math.min(255, Math.round(data[i] * 255)));
+  }
+  return out;
+}
+
+/**
+ * getPixels mit Rückfall-Varianten: Manche Photoshop-Versionen/Dokumente lehnen einzelne
+ * Optionen ab (z. B. applyAlpha ohne Transparenz). Dann wird mit weniger Optionen erneut gelesen.
+ */
+async function getPixelsRobust(req) {
+  const variants = [[], ["applyAlpha"], ["applyAlpha", "targetSize"], ["applyAlpha", "targetSize", "componentSize", "colorSpace"]];
+  let first = null;
+  for (const drop of variants) {
+    if (drop.length && !drop.some((k) => k in req)) continue;
+    const r = Object.assign({}, req);
+    for (const k of drop) delete r[k];
+    try {
+      return await imaging.getPixels(r);
+    } catch (e) {
+      if (!first) first = e;
+    }
+  }
+  throw first;
+}
+
+/**
+ * Liest ein Rechteck (Dokument-Komposit oder einzelne Ebene) und passt es in den
+ * Arbeits-Puffer dst (tw×th, comps Kanäle) ein, der das Dokument-Rechteck region abdeckt.
+ */
 async function readInto(dst, tw, th, comps, region, rect, doc, layerID) {
   const sx = tw / (region.right - region.left);
   const sy = th / (region.bottom - region.top);
@@ -74,10 +120,10 @@ async function readInto(dst, tw, th, comps, region, rect, doc, layerID) {
       height: Math.max(1, Math.round((rect.bottom - rect.top) * sy)),
     };
   }
-  const res = await imaging.getPixels(req);
+  const res = await getPixelsRobust(req);
   const img = res.imageData;
   try {
-    const data = await img.getData({ chunky: true });
+    const data = to8bit(await img.getData({ chunky: true }));
     const sb = res.sourceBounds || rect;
     const dx = Math.round((sb.left - region.left) * sx);
     const dy = Math.round((sb.top - region.top) * sy);
@@ -86,6 +132,15 @@ async function readInto(dst, tw, th, comps, region, rect, doc, layerID) {
     SC.blit(data, img.width, img.height, img.components, dst, tw, th, comps, dx, dy, dw, dh);
   } finally {
     img.dispose();
+  }
+}
+
+/** Sichtbarkeit setzen; fällt auf batchPlay zurück, falls die DOM-Eigenschaft scheitert. */
+async function setVisible(layer, on) {
+  try {
+    layer.visible = on;
+  } catch (e) {
+    await action.batchPlay([{ _obj: on ? "show" : "hide", null: [{ _ref: "layer", _id: layer.id }] }], {});
   }
 }
 
@@ -117,7 +172,7 @@ async function putRGBA(doc, layerID, rgba, w, h, left, top) {
       await put(buf16, { componentSize: 16 });
     } catch (e16) {
       throw new UserError(
-        "Photoshop hat die Pixel nicht angenommen (" + (e8 && e8.message) + "). Bitte das Dokument in 8 Bit/Kanal testen."
+        "Photoshop hat die Pixel nicht angenommen (8 Bit: " + (e8 && e8.message) + " / 16 Bit: " + (e16 && e16.message) + ")."
       );
     }
   }
@@ -203,28 +258,32 @@ async function apply(mode, p) {
     const oldId = resultOf[layer.id];
     if (oldId != null) {
       const old = findLayer(doc.layers, oldId);
-      if (old) await old.delete();
+      if (old) await step("Altes Ergebnis löschen", () => old.delete());
       delete sourceOf[oldId];
       delete resultOf[layer.id];
     }
 
-    layer.visible = true;
+    await step("Malebene einblenden", () => setVisible(layer, true));
     const stroke = new Uint8Array(tw * th * 4);
-    await readInto(stroke, tw, th, 4, region, lb, doc, layer.id);
-    layer.visible = false;
+    await step("Malebene lesen", () => readInto(stroke, tw, th, 4, region, lb, doc, layer.id));
+    await step("Malebene ausblenden", () => setVisible(layer, false));
     const base = new Uint8Array(tw * th * 3);
-    await readInto(base, tw, th, 3, region, region, doc, null);
+    await step("Bild lesen", () => readInto(base, tw, th, 3, region, region, doc, null));
 
-    const an = SC.analyze(base, tw, th, 3, Math.max(1, p.scale * s));
     let out;
+    await step("Berechnung", async () => {
+    const an = SC.analyze(base, tw, th, 3, Math.max(1, p.scale * s));
     if (mode === "paint") out = SC.paint(an, stroke, { wrap: p.wrap * s, follow: p.follow * s, shade: p.shade });
     else if (mode === "recolor") out = SC.recolor(an, stroke, { snap: p.snap * s, shade: p.shade, highlights: p.highlights });
     else out = SC.light(an, stroke, { radius: p.radius * s, intensity: p.intensity, height: p.height, relief: p.relief });
     out = upscale(out, tw, th, W, H);
+    });
 
     await selectLayer(layer);
-    const result = await doc.createLayer(constants.LayerKind.NORMAL, { name: MODE_NAMES[mode] + " (Surface Brush)" });
-    await putRGBA(doc, result.id, out, W, H, region.left, region.top);
+    const result = await step("Ergebnisebene anlegen", () =>
+      doc.createLayer(constants.LayerKind.NORMAL, { name: MODE_NAMES[mode] + " (Surface Brush)" })
+    );
+    await step("Ergebnis schreiben", () => putRGBA(doc, result.id, out, W, H, region.left, region.top));
     resultOf[layer.id] = result.id;
     sourceOf[result.id] = layer.id;
   });
@@ -240,15 +299,15 @@ async function decompose(p) {
   const { s, tw, th } = workSize(W, H, p.megapixels);
   await withHistory(doc, "Surface Brush: Zerlegung", async () => {
     const base = new Uint8Array(tw * th * 3);
-    await readInto(base, tw, th, 3, region, region, doc, null);
+    await step("Bild lesen", () => readInto(base, tw, th, 3, region, region, doc, null));
     const an = SC.analyze(base, tw, th, 3, Math.max(1, p.scale * s));
     const d = SC.decompose(an);
     const add = async (name, data, blendMode, visible) => {
       const opts = { name };
       if (blendMode) opts.blendMode = blendMode;
-      const l = await doc.createLayer(constants.LayerKind.NORMAL, opts);
-      await putRGBA(doc, l.id, upscale(data, tw, th, W, H), W, H, 0, 0);
-      if (!visible) l.visible = false;
+      const l = await step("Ebene anlegen", () => doc.createLayer(constants.LayerKind.NORMAL, opts));
+      await step("Ebene schreiben", () => putRGBA(doc, l.id, upscale(data, tw, th, W, H), W, H, 0, 0));
+      if (!visible) await setVisible(l, false);
     };
     await add("Normalen (Surface Brush)", d.normal, null, false);
     await add("Albedo (Surface Brush)", d.albedo, null, true);

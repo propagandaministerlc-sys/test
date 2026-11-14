@@ -64,3 +64,8 @@ sp-slider {
 .status.error {
   color: #ff7b6b;
 }
+.version {
+  margin-top: 8px;
+  font-size: 10px;
+  color: var(--uxp-host-text-color-secondary, #888);
+}
