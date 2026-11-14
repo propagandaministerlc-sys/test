@@ -54,7 +54,7 @@ const imaging = {
         right: Math.min(sb.right, l.bounds.right),
         bottom: Math.min(sb.bottom, l.bounds.bottom),
       };
-      color = () => l.fill;
+      color = () => l.fill || [0, 0, 0, 0];
       if (!l.fill && l.canvas) {
         sb = req.sourceBounds;
         color = (x, y) => Array.from(l.canvas.subarray(((y | 0) * DW + (x | 0)) * 4, ((y | 0) * DW + (x | 0)) * 4 + 4));
@@ -136,6 +136,11 @@ const assert = (c, m) => {
 };
 const alphaAt = (l, x, y) => (l.canvas ? l.canvas[(y * DW + x) * 4 + 3] : 0);
 
+// Ein Strich braucht mehrere Takte: abtasten, Stabilität bestätigen + übernehmen, Nachprüfung
+const tick3 = async () => {
+  for (let i = 0; i < 3; i++) await ps._tick();
+};
+
 (async () => {
   // Malebene: rotes Rechteck 300..500 × 200..320
   const strokes = makeLayer("Malebene", { left: 300, top: 200, right: 500, bottom: 320 }, [220, 30, 30, 255]);
@@ -193,21 +198,40 @@ const alphaAt = (l, x, y) => (l.canvas ? l.canvas[(y * DW + x) * 4 + 3] : 0);
   // Mitten im Strich (Ebene hat schon Pixel, aber kein neuer Protokollschritt): nicht eingreifen
   paintL.bounds = { left: 100, top: 100, right: 130, bottom: 130 };
   paintL.fill = [30, 60, 220, 255];
-  await ps._tick();
+  await tick3();
   assert(paintL.fill !== null && !resL.pixels, "Live: kein Eingriff mitten im Strich");
   strokeOn(paintL, { left: 100, top: 100, right: 220, bottom: 140 }, [30, 60, 220, 255]);
-  await ps._tick();
+  await tick3();
   assert(resL.pixels && alphaAt(resL, 160, 120) > 240, "Live: erster Strich im Ergebnis");
   assert(paintL.fill === null, "Live: Malebene nach dem Strich geleert");
   assert(!msgs.some((m) => m[1]), "Live: keine Fehlermeldung");
   // zweiter Strich weiter rechts: Ergebnis wird nur im betroffenen Bereich geschrieben
   strokeOn(paintL, { left: 600, top: 400, right: 700, bottom: 430 }, [220, 30, 30, 255]);
-  await ps._tick();
+  await tick3();
   assert(alphaAt(resL, 650, 415) > 240 && resL.pixels.left >= 560, "Live: zweiter Strich, nur Teilbereich neu geschrieben");
   // überlappender Strich: der alte bleibt im Bereich erhalten (wird aus dem Gesamtstand neu berechnet)
   strokeOn(paintL, { left: 680, top: 400, right: 760, bottom: 430 }, [30, 200, 30, 255]);
-  await ps._tick();
+  await tick3();
   assert(alphaAt(resL, 650, 415) > 240 && alphaAt(resL, 740, 415) > 240, "Live: überlappende Striche bleiben beide erhalten");
+  // Veraltete Ebenengrenzen: bounds zeigt noch den alten, kleineren Bereich – der Strich muss trotzdem ganz ankommen
+  strokeOn(paintL, { left: 100, top: 480, right: 400, bottom: 520 }, [200, 200, 30, 255]);
+  const realGet = imaging.getPixels;
+  Object.defineProperty(paintL, "bounds", { configurable: true, get: () => ({ left: 100, top: 480, right: 180, bottom: 520 }) });
+  imaging.getPixels = async (req) => {
+    if (req.layerID !== paintL.id || !paintL.fill) return realGet(req);
+    Object.defineProperty(paintL, "bounds", { configurable: true, writable: true, value: { left: 100, top: 480, right: 400, bottom: 520 } });
+    const r = await realGet(req);
+    Object.defineProperty(paintL, "bounds", { configurable: true, get: () => ({ left: 100, top: 480, right: 180, bottom: 520 }) });
+    return r;
+  };
+  await tick3();
+  imaging.getPixels = realGet;
+  Object.defineProperty(paintL, "bounds", { configurable: true, writable: true, value: { left: 0, top: 0, right: 0, bottom: 0 } });
+  assert(alphaAt(resL, 120, 500) > 240 && alphaAt(resL, 380, 500) > 240, "Live: ganzer Strich trotz veralteter Ebenengrenzen");
+  await ps.undoLive();
+  await ps.undoLive();
+  strokeOn(paintL, { left: 680, top: 400, right: 760, bottom: 430 }, [30, 200, 30, 255]);
+  await tick3();
   await ps.undoLive();
   assert(alphaAt(resL, 740, 415) < 40 && alphaAt(resL, 650, 415) > 240, "Live: »Strich zurück« entfernt nur den letzten");
   await ps.setLiveMode("paint");
@@ -223,7 +247,7 @@ const alphaAt = (l, x, y) => (l.canvas ? l.canvas[(y * DW + x) * 4 + 3] : 0);
   const ap = doc.layers[0];
   const ar = doc.layers[1];
   strokeOn(ap, { left: 200, top: 300, right: 500, bottom: 340 }, [220, 30, 30, 255]); // 40 px breiter Strich
-  await ps._tick();
+  await tick3();
   assert(!amsgs.some((m) => m[1]) && alphaAt(ar, 350, 320) > 200, "Automatik (Live): Strich übernommen");
   const am = /Pinsel ≈ (\d+) px, Faltengröße (\d+) px/.exec(amsgs[amsgs.length - 1][0]);
   assert(am && Number(am[1]) >= 30 && Number(am[1]) <= 50 && Number(am[2]) >= 2, "Automatik (Live): Pinselbreite gemessen: " + (am && am[0]));

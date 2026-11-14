@@ -576,8 +576,9 @@ async function liveTick(st, fromEvent) {
   const doc = app.activeDocument;
   if (!doc || doc.id !== st.docId) return;
   // Nur nach einem abgeschlossenen Strich eingreifen (neuer Protokollschritt) – niemals mitten im Malen.
+  // st.recheck: direkt nach einer Übernahme wird noch einmal nachgesehen, ob Farbe übrig geblieben ist.
   const hid = histId(doc);
-  if (hid === null ? !fromEvent : hid === st.lastHist) return;
+  if (!st.recheck && (hid === null ? !fromEvent : hid === st.lastHist)) return;
   const paint = findLayer(doc.layers, st.paintId);
   const result = findLayer(doc.layers, st.resultId);
   if (!paint || !result) {
@@ -585,14 +586,60 @@ async function liveTick(st, fromEvent) {
     st.onStatus("Live-Modus beendet: Die Live-Ebenen wurden gelöscht.", true);
     return;
   }
-  const b = paint.bounds;
-  const lb = {
-    left: Math.max(0, Math.floor(b.left)),
-    top: Math.max(0, Math.floor(b.top)),
-    right: Math.min(st.W, Math.ceil(b.right)),
-    bottom: Math.min(st.H, Math.ceil(b.bottom)),
-  };
-  if (lb.right <= lb.left || lb.bottom <= lb.top) return;
+  // Tatsächlichen Inhalt der Malebene in kleiner Auflösung abtasten. Die von Photoshop gemeldeten
+  // Ebenengrenzen können hinter dem gerade gemalten Strich zurückliegen – darauf wird nicht vertraut.
+  st.busy = true;
+  let lb = null;
+  try {
+    const d = Math.min(1, 512 / Math.max(st.W, st.H));
+    const pw = Math.max(1, Math.round(st.W * d));
+    const ph = Math.max(1, Math.round(st.H * d));
+    const probe = new Uint8Array(pw * ph * 4);
+    const full = { left: 0, top: 0, right: st.W, bottom: st.H };
+    await core.executeAsModal(() => readInto(probe, pw, ph, 4, full, full, doc, paint.id), { commandName: "Surface Brush: Malebene prüfen" });
+    let x0 = pw, y0 = ph, x1 = -1, y1 = -1, hash = 0;
+    for (let y = 0; y < ph; y++) {
+      for (let x = 0; x < pw; x++) {
+        const a = probe[(y * pw + x) * 4 + 3];
+        if (!a) continue;
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+        hash = (Math.imul(hash, 31) + a + x * 7 + y * 13) | 0;
+      }
+    }
+    if (x1 < 0) {
+      // Malebene ist leer: nichts zu tun
+      st.recheck = false;
+      st.probeHash = null;
+      st.lastHist = hid;
+      return;
+    }
+    if (st.probeHash !== hash) {
+      // Inhalt hat sich seit der letzten Prüfung geändert: erst übernehmen, wenn er stabil ist
+      st.probeHash = hash;
+      st.recheck = true;
+      return;
+    }
+    const pad = 3;
+    lb = {
+      left: Math.max(0, Math.floor(((x0 - pad) * st.W) / pw)),
+      top: Math.max(0, Math.floor(((y0 - pad) * st.H) / ph)),
+      right: Math.min(st.W, Math.ceil(((x1 + 1 + pad) * st.W) / pw)),
+      bottom: Math.min(st.H, Math.ceil(((y1 + 1 + pad) * st.H) / ph)),
+    };
+  } catch (e) {
+    if (!isModalBusy(e)) {
+      await stopLive();
+      st.onStatus("Live-Modus beendet. Fehler: [Malebene prüfen] " + (e && e.message ? e.message : String(e)), true);
+    }
+    return;
+  } finally {
+    if (!lb) st.busy = false;
+  }
+  st.probeHash = null;
+  st.recheck = true; // nach der Übernahme noch einmal prüfen
   st.busy = true;
   const t0 = Date.now();
   try {
@@ -662,7 +709,7 @@ async function startLive(mode, getParams, onStatus) {
   const H = doc.height;
   if (W * H > 60e6) throw new UserError("Das Dokument ist für den Live-Modus zu groß (über 60 Megapixel).");
   const st = {
-    docId: doc.id, W, H, mode, onStatus, lastHist: null, autoB: 0, autoScale: 0,
+    docId: doc.id, W, H, mode, onStatus, lastHist: null, autoB: 0, autoScale: 0, recheck: false, probeHash: null,
     rawParams: getParams,
     getParams: () => docParams(getParams(), W, H),
     base: new Uint8Array(W * H * 3), accum: new Uint8Array(W * H * 4),
