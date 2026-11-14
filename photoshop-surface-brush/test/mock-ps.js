@@ -257,6 +257,51 @@ const tick3 = async () => {
   doc.activeLayers = [ml];
   const ai = await ps.apply("recolor", Object.assign({}, PA, { megapixels: 16 }));
   assert(ai.auto && ai.auto.brush > 60 && ai.auto.scale >= 1.5 && alphaAt(doc.layers[0], 400, 260) > 240, "Automatik (manuell): Werte aus dem Strich abgeleitet");
+  // ---------- Claude ----------
+  doc.layers = [];
+  let sent = null;
+  const reply = (obj, extra) => ({ ok: true, status: 200, json: async () => Object.assign({ stop_reason: "end_turn", content: [{ type: "text", text: JSON.stringify(obj) }] }, extra || {}) });
+  let next = reply({
+    summary: "Fläche umgefärbt und ein Licht gesetzt.",
+    actions: [
+      { mode: "recolor", color: "#1e6b3a", polygons: [[{ x: 200, y: 200 }, { x: 600, y: 200 }, { x: 600, y: 700 }, { x: 200, y: 700 }]], size: 0, strength: 100 },
+      { mode: "light", color: "#ffd9a0", polygons: [[{ x: 780, y: 180 }, { x: 820, y: 180 }, { x: 820, y: 220 }, { x: 780, y: 220 }]], size: 80, strength: 100 },
+      { mode: "unsinn", color: "#000000", polygons: [], size: 0, strength: 0 },
+    ],
+  });
+  global.fetch = async (url, opts) => {
+    sent = { url, opts, body: JSON.parse(opts.body) };
+    return next;
+  };
+  imaging.encodeImageData = async (o) => (o.base64 && o.imageData.o.components === 3 ? "QUJD" : null);
+  const cr = await ps.runClaude("sk-ant-test", "Färbe die Fläche grün und setze ein Licht", { megapixels: 16 }, () => {});
+  assert(sent.url === "https://api.anthropic.com/v1/messages" && sent.opts.headers["x-api-key"] === "sk-ant-test" && sent.opts.headers["anthropic-version"] === "2026-10-21", "Claude: Anfrage an die Messages-API mit Schlüssel und Version");
+  assert(sent.body.model === "claude-opus-5-5" && sent.body.output_config.format.type === "json_schema" && sent.body.messages[0].content[0].type === "image" && sent.body.messages[0].content[0].source.data === "QUJD", "Claude: Modell, JSON-Schema und Bild in der Anfrage");
+  assert(!("temperature" in sent.body) && !("thinking" in sent.body), "Claude: keine entfernten Parameter in der Anfrage");
+  assert(cr.count === 2 && doc.layers.length === 2, "Claude: zwei gültige Aktionen ausgeführt, ungültige verworfen");
+  const recL = doc.layers[1];
+  const ligL = doc.layers[0];
+  assert(alphaAt(recL, 360, 270) > 240 && alphaAt(recL, 100, 270) < 20 && alphaAt(recL, 700, 270) < 20, "Claude: Umfärbung liegt im angegebenen Polygon");
+  assert(alphaAt(ligL, 720, 120) > 200, "Claude: Licht an der angegebenen Stelle");
+  next = { ok: false, status: 401, json: async () => ({ error: { message: "invalid x-api-key" } }) };
+  let cmsg = "";
+  try {
+    await ps.runClaude("falsch", "egal", { megapixels: 4 }, () => {});
+  } catch (e) {
+    cmsg = e instanceof ps.UserError ? e.message : "";
+  }
+  assert(/API-Schlüssel wurde abgelehnt/.test(cmsg), "Claude: abgelehnter Schlüssel ergibt verständliche Meldung");
+  next = reply({ summary: "x", actions: [] }, { stop_reason: "refusal" });
+  cmsg = "";
+  try {
+    await ps.runClaude("k", "egal", { megapixels: 4 }, () => {});
+  } catch (e) {
+    cmsg = e instanceof ps.UserError ? e.message : "";
+  }
+  assert(/abgelehnt/.test(cmsg), "Claude: Ablehnung wird gemeldet");
+  next = reply({ summary: "Im Bild ist kein Auto zu sehen.", actions: [] });
+  const none = await ps.runClaude("k", "Färbe das Auto rot", { megapixels: 4 }, () => {});
+  assert(none.count === 0 && /kein Auto/.test(none.summary), "Claude: leere Aktionsliste wird mit Begründung zurückgegeben");
   console.log("alle Prüfungen bestanden");
 })().catch((e) => {
   console.error(e);

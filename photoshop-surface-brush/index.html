@@ -10,10 +10,21 @@
     <div class="tab active" data-mode="paint">Pinsel</div>
     <div class="tab" data-mode="recolor">Umfärben</div>
     <div class="tab" data-mode="light">Licht</div>
+    <div class="tab" data-mode="claude">Claude</div>
   </div>
 
   <div class="hint" id="hint"></div>
 
+  <div class="group" data-for="claude">
+    <sp-textarea id="claudePrompt" placeholder="z. B.: Färbe den Hoodie dunkelgrün. Setze ein warmes Licht von links oben."></sp-textarea>
+    <div class="buttons">
+      <sp-button id="claudeRun" variant="cta">Mit Claude ausführen</sp-button>
+    </div>
+    <sp-textfield id="claudeKey" type="password" placeholder="Anthropic-API-Schlüssel (sk-ant-…)"></sp-textfield>
+    <div class="note">Der Schlüssel wird nur auf diesem Rechner gespeichert. Beim Ausführen wird eine verkleinerte Fassung des Bildes an die Anthropic-API gesendet; die Nutzung wird über deinen API-Schlüssel abgerechnet.</div>
+  </div>
+
+  <div id="brushUi">
   <div class="group">
     <sp-checkbox id="auto" checked>Automatik: Werte an Pinselgröße und Bild anpassen</sp-checkbox>
   </div>
@@ -39,7 +50,6 @@
 
   <div class="group">
     <sp-slider id="scale" min="1" max="30" value="5"><sp-label slot="label">Faltengröße</sp-label></sp-slider>
-    <sp-slider id="quality" min="1" max="16" value="6"><sp-label slot="label">Max. Rechenauflösung (Megapixel)</sp-label></sp-slider>
   </div>
 
   <div class="section">Live</div>
@@ -56,7 +66,13 @@
     <sp-action-button id="decompose">Bild in Albedo / Schattierung / Normalen zerlegen</sp-action-button>
   </div>
 
+  </div>
+
+  <div class="group">
+    <sp-slider id="quality" min="1" max="16" value="6"><sp-label slot="label">Max. Rechenauflösung (Megapixel)</sp-label></sp-slider>
+  </div>
+
   <div class="status" id="status"></div>
-  <div class="version">Version 1.4.2</div>
+  <div class="version">Version 1.5.0</div>
 </body>
 </html>

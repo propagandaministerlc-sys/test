@@ -50,6 +50,15 @@ Das Bild unter den Strichen wird beim Start einmal eingelesen. Wer danach das Fo
 4. Modus wählen (Pinsel / Umfärben / Licht) und **2 · Anwenden** klicken.
 5. Regler ändern und erneut **Anwenden** ersetzt das Ergebnis. Mit Strg/Cmd+Z geht alles in einem Schritt zurück.
 
+### Claude
+
+Im Tab **Claude** beschreibst du in Worten, was passieren soll, z. B. „Färbe den Hoodie dunkelgrün und setze ein warmes Licht von links oben“. Das Plugin schickt eine verkleinerte Fassung des sichtbaren Bildes (lange Seite höchstens 1200 px) mit deiner Anweisung an die Anthropic-API. Claude antwortet mit Aktionen (Umfärben, Malen, Licht) samt Bereichen als Polygonen; das Plugin führt sie aus, je Aktion eine neue Ebene.
+
+- Du brauchst einen eigenen **Anthropic-API-Schlüssel** (console.anthropic.com). Er wird nur auf deinem Rechner gespeichert; die Nutzung wird über diesen Schlüssel abgerechnet.
+- Verwendet wird das Modell `claude-opus-5-5`.
+- Claude gibt Bereiche nur grob als Umriss an. Beim Umfärben rastet das Plugin die Kante an Objektkanten ein, pixelgenaue Masken darfst du nicht erwarten.
+- Der Live-Modus muss dafür beendet sein.
+
 ### Automatik
 
 Ist **Automatik** angehakt (Standard), misst das Plugin die Breite jedes Strichs und leitet daraus Wölbung, Faltenfluss, Kanten-Fang und Licht-Ausbreitung ab. Die Faltengröße wird je Strich aus dem Bild bestimmt: Es wird die Strukturgröße gewählt, bei der der Bildbereich das stärkste Relief zeigt. Die Längen-Regler sind dann ausgeblendet; ohne Haken gelten wieder die Regler.
@@ -80,6 +89,7 @@ node test/mock-ps.js   # Ablauf gegen eine Attrappe der Photoshop-API
 ## Aufbau
 
 - `core.js` – Algorithmen (Relief-/Licht-Schätzung, Pinsel, Umfärben, Licht, Zerlegung)
-- `ps.js` – Photoshop-Anbindung (Imaging-API, Ebenen)
+- `ps.js` – Photoshop-Anbindung (Imaging-API, Ebenen, Live-Modus)
+- `claude.js` – Anbindung an die Claude-API
 - `main.js`, `index.html`, `styles.css` – Panel
 - `manifest.json`, `icons/` – Plugin-Beschreibung

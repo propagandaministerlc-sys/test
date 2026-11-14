@@ -6,6 +6,8 @@ const HINTS = {
     "Mit dem normalen Pinsel auf die Malebene malen. »Anwenden« legt die Striche auf die Oberfläche: sie biegen sich über Falten, laufen an ihnen entlang und übernehmen die Schatten.",
   recolor:
     "Die Fläche grob in der Wunschfarbe übermalen. »Anwenden« färbt sie um und erhält Schatten, Falten und Glanzlichter – auch von Schwarz nach Weiß.",
+  claude:
+    "Beschreibe in Worten, was passieren soll. Claude sieht sich das Bild an, findet die gemeinten Bereiche und führt Umfärben, Malen oder Licht aus – jede Aktion wird eine eigene Ebene.",
   light:
     "Dort einen Klecks in der Lichtfarbe malen, wo Licht hin soll. »Anwenden« beleuchtet die Umgebung passend zum Relief der Oberfläche.",
 };
@@ -26,7 +28,6 @@ function status(text, isError) {
 }
 
 function setMode(m) {
-  mode = m;
   document.querySelectorAll(".tab").forEach((t) => {
     t.className = t.getAttribute("data-mode") === m ? "tab active" : "tab";
   });
@@ -35,6 +36,10 @@ function setMode(m) {
     g.className = !f || f === m ? "group" : "group hidden";
   });
   $("hint").textContent = HINTS[m];
+  // Der Claude-Tab ist nur eine Ansicht: der Pinsel-Modus (für Live/Manuell) bleibt, wie er war
+  $("brushUi").style.display = m === "claude" ? "none" : "";
+  if (m === "claude") return;
+  mode = m;
   if (ps.isLive()) {
     ps.setLiveMode(m).catch((e) => status("Fehler: " + (e && e.message ? e.message : String(e)), true));
   }
@@ -46,6 +51,35 @@ function updateLiveButton() {
 function liveStatus(text, isError) {
   status(text, isError);
   updateLiveButton();
+}
+
+// API-Schlüssel: bevorzugt im sicheren Speicher von UXP, sonst im lokalen Speicher des Plugins
+const KEY_NAME = "surfaceBrushAnthropicKey";
+async function loadKey() {
+  try {
+    const v = await require("uxp").storage.secureStorage.getItem(KEY_NAME);
+    if (v && v.length) return typeof v === "string" ? v : String.fromCharCode.apply(null, Array.from(v));
+  } catch (e) {
+    /* weiter unten */
+  }
+  try {
+    return window.localStorage.getItem(KEY_NAME) || "";
+  } catch (e) {
+    return "";
+  }
+}
+async function saveKey(value) {
+  try {
+    await require("uxp").storage.secureStorage.setItem(KEY_NAME, value);
+    return;
+  } catch (e) {
+    /* weiter unten */
+  }
+  try {
+    window.localStorage.setItem(KEY_NAME, value);
+  } catch (e) {
+    /* dann eben nur für diese Sitzung */
+  }
 }
 
 function isAuto() {
@@ -96,9 +130,13 @@ async function run(label, fn) {
     if (info && info.auto) {
       msg += " Automatik: Pinsel ≈ " + Math.round(info.auto.brush) + " px, Faltengröße " + Math.round(info.auto.scale) + " px.";
     }
-    if (info === "live") msg = ps.isLive() ? "Live-Modus läuft: Einfach mit dem Pinsel malen – jeder Strich wird beim Loslassen übernommen." : "Live-Modus beendet.";
+    if (info && info.summary !== undefined) {
+      msg = info.count
+        ? "Claude (" + info.count + " Aktion" + (info.count > 1 ? "en" : "") + ", " + ((Date.now() - t0) / 1000).toFixed(0) + " s): " + info.summary
+        : "Claude hat nichts ausgeführt: " + (info.summary || "keine passende Aktion gefunden.");
+    } else if (info === "live") msg = ps.isLive() ? "Live-Modus läuft: Einfach mit dem Pinsel malen – jeder Strich wird beim Loslassen übernommen." : "Live-Modus beendet.";
     else if (info === "undo") msg = "Letzter Strich zurückgenommen.";
-    else if (info) msg += " Regler ändern und erneut »Anwenden« ersetzt das Ergebnis.";
+    else if (info && info.summary === undefined) msg += " Regler ändern und erneut »Anwenden« ersetzt das Ergebnis.";
     status(msg);
   } catch (e) {
     const text = e instanceof ps.UserError ? e.message : "Fehler: " + (e && e.message ? e.message : String(e));
@@ -135,6 +173,16 @@ function init() {
   );
   $("apply").addEventListener("click", () => run("Berechne", () => ps.apply(mode, params())));
   $("decompose").addEventListener("click", () => run("Zerlege Bild", () => ps.decompose(params())));
+  $("claudeRun").addEventListener("click", () =>
+    run("Bereite Bild für Claude vor", async () => {
+      const key = String($("claudeKey").value || "").trim();
+      if (key) await saveKey(key);
+      return ps.runClaude(key, String($("claudePrompt").value || ""), { megapixels: num("quality") }, (t) => status(t));
+    })
+  );
+  loadKey().then((k) => {
+    if (k) $("claudeKey").value = k;
+  });
   $("auto").addEventListener("change", updateAuto);
   $("auto").addEventListener("click", () => setTimeout(updateAuto, 0));
   setMode("paint");

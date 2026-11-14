@@ -807,4 +807,103 @@ function isLive() {
   return !!live;
 }
 
-module.exports = { apply, decompose, newStrokeLayer, UserError, startLive, stopLive, setLiveMode, undoLive, isLive, _tick: () => (live ? liveTick(live, true) : null) };
+// ====================== Claude ======================
+const CL = require("./claude.js");
+
+/** Bild als JPEG (Base64) für Claude: lange Seite höchstens maxSide Pixel. */
+async function encodeForClaude(doc, base, w, h, maxSide) {
+  const d = Math.min(1, maxSide / Math.max(w, h));
+  const jw = Math.max(1, Math.round(w * d));
+  const jh = Math.max(1, Math.round(h * d));
+  const small = d < 1 ? scaleBufAny(base, w, h, 3, jw, jh) : base;
+  const img = await imaging.createImageDataFromBuffer(small, {
+    width: jw, height: jh, components: 3, chunky: true, colorSpace: "RGB", colorProfile: "sRGB IEC61966-2.1",
+  });
+  try {
+    const b64 = await imaging.encodeImageData({ imageData: img, base64: true });
+    if (typeof b64 !== "string" || !b64.length) throw new Error("JPEG-Kodierung lieferte keine Daten");
+    return b64;
+  } finally {
+    img.dispose();
+  }
+}
+
+/**
+ * Claude bekommt das sichtbare Bild und die Anweisung, liefert Aktionen (Modus, Farbe, Polygone),
+ * und das Plugin führt sie aus – je Aktion eine neue Ebene.
+ */
+async function runClaude(apiKey, instruction, p, onStatus) {
+  const doc = activeDoc();
+  if (live) throw new UserError("Bitte zuerst den Live-Modus beenden.");
+  if (!apiKey) throw new UserError("Bitte zuerst einen Anthropic-API-Schlüssel eintragen.");
+  if (!instruction || !instruction.trim()) throw new UserError("Bitte beschreiben, was Claude tun soll.");
+  const W = doc.width;
+  const H = doc.height;
+  const full = { left: 0, top: 0, right: W, bottom: H };
+  const { s, tw, th } = workSize(W, H, p.megapixels);
+  const base = new Uint8Array(tw * th * 3);
+  let jpeg = null;
+  await core.executeAsModal(
+    async () => {
+      await step("Bild lesen", () => readInto(base, tw, th, 3, full, full, doc, null));
+      jpeg = await step("Bild für Claude vorbereiten", () => encodeForClaude(doc, base, tw, th, 1200));
+    },
+    { commandName: "Surface Brush: Bild für Claude" }
+  );
+  if (onStatus) onStatus("Claude sieht sich das Bild an …");
+  let plan;
+  try {
+    plan = await CL.askClaude(fetch, apiKey, jpeg, instruction);
+  } catch (e) {
+    if (e instanceof CL.ClaudeError) throw new UserError(e.message);
+    throw e;
+  }
+  if (!plan.actions.length) return { summary: plan.summary, count: 0, scale: s };
+  if (onStatus) onStatus("Claude: " + plan.actions.length + " Aktion(en) – wird ausgeführt …");
+  const long = Math.max(tw, th);
+  await withHistory(doc, "Surface Brush: Claude", async () => {
+    const sigma = Math.max(1.5, long / 300);
+    const an = SC.analyze(base, tw, th, 3, sigma);
+    for (const a of plan.actions) {
+      const stroke = CL.rasterize(a.polygons, a.color, tw, th);
+      let out;
+      await step("Berechnung", async () => {
+        if (a.mode === "recolor") {
+          out = SC.recolor(an, stroke, { snap: Math.max(4, 0.012 * long), shade: Math.min(1, a.strength / 100), highlights: 0.5 });
+        } else if (a.mode === "paint") {
+          const B = Math.min(SC.strokeWidth(stroke, tw, th), long * 0.06);
+          out = SC.paint(an, stroke, { wrap: 0.25 * B, follow: 0.25 * B, shade: Math.min(1, a.strength / 100) });
+        } else {
+          const radius = a.size > 0 ? (a.size / CL.GRID) * long : 0.08 * long;
+          out = SC.light(an, stroke, { radius: Math.max(4, radius), intensity: a.strength / 100, height: 0.4, relief: 0.5 });
+        }
+      });
+      // nur den belegten Bereich schreiben
+      let x0 = tw, y0 = th, x1 = -1, y1 = -1;
+      for (let y = 0; y < th; y++) {
+        for (let x = 0; x < tw; x++) {
+          if (!out[(y * tw + x) * 4 + 3]) continue;
+          if (x < x0) x0 = x;
+          if (x > x1) x1 = x;
+          if (y < y0) y0 = y;
+          if (y > y1) y1 = y;
+        }
+      }
+      if (x1 < 0) continue;
+      const r = { left: x0, top: y0, right: x1 + 1, bottom: y1 + 1 };
+      const d = {
+        left: Math.floor(r.left / s), top: Math.floor(r.top / s),
+        right: Math.min(W, Math.ceil(r.right / s)), bottom: Math.min(H, Math.ceil(r.bottom / s)),
+      };
+      const crop = cropBuf(out, tw, 4, r);
+      const big = upscale(crop, r.right - r.left, r.bottom - r.top, d.right - d.left, d.bottom - d.top);
+      const layer = await step("Ebene anlegen", () =>
+        doc.createLayer(constants.LayerKind.NORMAL, { name: "Claude: " + MODE_NAMES[a.mode] + " (Surface Brush)" })
+      );
+      await step("Ergebnis schreiben", () => putRGBA(doc, layer.id, big, d.right - d.left, d.bottom - d.top, d.left, d.top));
+    }
+  });
+  return { summary: plan.summary, count: plan.actions.length, scale: s };
+}
+
+module.exports = { apply, decompose, newStrokeLayer, UserError, startLive, stopLive, setLiveMode, undoLive, isLive, runClaude, _tick: () => (live ? liveTick(live, true) : null) };

@@ -75,3 +75,20 @@ sp-slider {
   text-transform: uppercase;
   color: var(--uxp-host-text-color-secondary, #999);
 }
+.note {
+  margin-top: 6px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--uxp-host-text-color-secondary, #999);
+}
+sp-textarea,
+sp-textfield {
+  width: 100%;
+  margin-bottom: 6px;
+}
+sp-textarea {
+  min-height: 80px;
+}
+.tab {
+  font-size: 11px;
+}

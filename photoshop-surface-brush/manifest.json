@@ -1,7 +1,7 @@
 {
   "id": "com.surfacebrush.photoshop",
   "name": "Surface Brush",
-  "version": "1.4.2",
+  "version": "1.5.0",
   "main": "index.html",
   "manifestVersion": 5,
   "host": {
@@ -15,17 +15,80 @@
       "label": {
         "default": "Surface Brush"
       },
-      "minimumSize": { "width": 240, "height": 360 },
-      "maximumSize": { "width": 600, "height": 2000 },
-      "preferredDockedSize": { "width": 280, "height": 520 },
-      "preferredFloatingSize": { "width": 300, "height": 560 },
+      "minimumSize": {
+        "width": 240,
+        "height": 360
+      },
+      "maximumSize": {
+        "width": 600,
+        "height": 2000
+      },
+      "preferredDockedSize": {
+        "width": 280,
+        "height": 520
+      },
+      "preferredFloatingSize": {
+        "width": 300,
+        "height": 560
+      },
       "icons": [
-        { "width": 23, "height": 23, "path": "icons/dark.png", "scale": [1, 2], "theme": ["darkest", "dark", "medium"] },
-        { "width": 23, "height": 23, "path": "icons/light.png", "scale": [1, 2], "theme": ["lightest", "light"] }
+        {
+          "width": 23,
+          "height": 23,
+          "path": "icons/dark.png",
+          "scale": [
+            1,
+            2
+          ],
+          "theme": [
+            "darkest",
+            "dark",
+            "medium"
+          ]
+        },
+        {
+          "width": 23,
+          "height": 23,
+          "path": "icons/light.png",
+          "scale": [
+            1,
+            2
+          ],
+          "theme": [
+            "lightest",
+            "light"
+          ]
+        }
       ]
     }
   ],
   "icons": [
-    { "width": 48, "height": 48, "path": "icons/plugin.png", "scale": [1, 2], "theme": ["darkest", "dark", "medium", "lightest", "light", "all"], "species": ["pluginList"] }
-  ]
+    {
+      "width": 48,
+      "height": 48,
+      "path": "icons/plugin.png",
+      "scale": [
+        1,
+        2
+      ],
+      "theme": [
+        "darkest",
+        "dark",
+        "medium",
+        "lightest",
+        "light",
+        "all"
+      ],
+      "species": [
+        "pluginList"
+      ]
+    }
+  ],
+  "requiredPermissions": {
+    "network": {
+      "domains": [
+        "https://api.anthropic.com"
+      ]
+    }
+  }
 }
