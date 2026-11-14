@@ -2,6 +2,7 @@
 // (Ersetzt keinen Test in echtem Photoshop – prüft Ablauf, Koordinaten und Skalierung.)
 const Module = require("module");
 
+const BITS = Number(process.env.BITS || 8); // BITS=16 simuliert ein 16-Bit-Dokument
 const DW = 900;
 const DH = 600;
 let nextId = 10;
@@ -15,6 +16,7 @@ const doc = {
   width: DW,
   height: DH,
   mode: "RGBColorMode",
+  bitsPerChannel: BITS === 16 ? "bitDepth16" : "bitDepth8",
   colorProfileName: "sRGB IEC61966-2.1",
   layers: [],
   activeLayers: [],
@@ -33,6 +35,7 @@ const doc = {
 const imaging = {
   async getPixels(req) {
     calls.push(req);
+    if (BITS === 16 && req.componentSize === 8) throw new Error("componentSize 8 im 16-Bit-Dokument abgelehnt (Attrappe)");
     if (req.applyAlpha) throw new Error("applyAlpha abgelehnt (Attrappe)"); // Rückfall muss greifen
     let sb = req.sourceBounds;
     let comps = 3;
@@ -51,6 +54,10 @@ const imaging = {
         bottom: Math.min(sb.bottom, l.bounds.bottom),
       };
       color = () => l.fill;
+      if (!l.fill && l.canvas) {
+        sb = req.sourceBounds;
+        color = (x, y) => Array.from(l.canvas.subarray(((y | 0) * DW + (x | 0)) * 4, ((y | 0) * DW + (x | 0)) * 4 + 4));
+      }
     } else if (doc.layers.some((l) => l.fill && l.visible)) {
       throw new Error("Komposit gelesen, obwohl die Malebene noch sichtbar ist");
     }
@@ -65,7 +72,9 @@ const imaging = {
         for (let k = 0; k < comps; k++) data[(y * w + x) * comps + k] = c[k];
       }
     }
-    return { sourceBounds: sb, imageData: { width: w, height: h, components: comps, getData: async () => data, dispose() {} } };
+    let outData = data;
+    if (BITS === 16) outData = Uint16Array.from(data, (v) => Math.round((v * 32768) / 255));
+    return { sourceBounds: sb, imageData: { width: w, height: h, components: comps, getData: async () => outData, dispose() {} } };
   },
   async createImageDataFromBuffer(buf, o) {
     if (o.width * o.height * o.components !== buf.length) throw new Error("Puffergröße passt nicht");
@@ -73,6 +82,17 @@ const imaging = {
   },
   async putPixels(o) {
     const l = doc.layers.find((x) => x.id === o.layerID);
+    if (BITS === 16) {
+      const src = o.imageData.buf;
+      const conv = new Uint8Array(src.length);
+      if (src instanceof Uint16Array && !o.imageData.o.fullRange) {
+        for (let i = 0; i < src.length; i++) conv[i] = Math.round((src[i] * 255) / 32768);
+      } else {
+        // 8-Bit-Daten im 16-Bit-Dokument: Transparenz geht verloren (wie beim schwarzen Rechteck beobachtet)
+        for (let i = 0; i < src.length; i++) conv[i] = i % 4 === 3 ? 255 : src[i];
+      }
+      o.imageData.buf = conv;
+    }
     if (l.fill && !o.imageData.buf.some((v) => v)) {
       // Leeren der Malebene: wie in Photoshop schrumpfen die Grenzen auf null
       l.fill = null;

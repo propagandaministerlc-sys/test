@@ -111,7 +111,9 @@ async function getPixelsRobust(req) {
 async function readInto(dst, tw, th, comps, region, rect, doc, layerID) {
   const sx = tw / (region.right - region.left);
   const sy = th / (region.bottom - region.top);
-  const req = { documentID: doc.id, sourceBounds: rect, colorSpace: "RGB", componentSize: 8 };
+  const req = { documentID: doc.id, sourceBounds: rect, colorSpace: "RGB" };
+  // In 16-Bit-Dokumenten in der Original-Tiefe lesen (8 Bit anzufordern schlägt dort fehl) und selbst wandeln
+  if (bitDepth(doc) === 8) req.componentSize = 8;
   if (layerID != null) req.layerID = layerID;
   else req.applyAlpha = true;
   if (sx < 0.999) {
@@ -144,38 +146,109 @@ async function setVisible(layer, on) {
   }
 }
 
-async function putRGBA(doc, layerID, rgba, w, h, left, top) {
-  const base = {
-    width: w,
-    height: h,
-    components: 4,
-    chunky: true,
-    colorSpace: "RGB",
-    colorProfile: doc.colorProfileName || "sRGB IEC61966-2.1",
-  };
-  const put = async (buf, extra) => {
-    const img = await imaging.createImageDataFromBuffer(buf, Object.assign({}, base, extra));
-    try {
-      await imaging.putPixels({ documentID: doc.id, layerID, imageData: img, targetBounds: { left, top }, replace: true });
-    } finally {
-      img.dispose();
-    }
-  };
+function bitDepth(doc) {
+  const b = String(doc.bitsPerChannel || "");
+  return b.indexOf("32") >= 0 ? 32 : b.indexOf("16") >= 0 ? 16 : 8;
+}
+
+// Schreibvarianten: Welche Photoshop annimmt UND korrekt (mit Transparenz) übernimmt, hängt von
+// Bit-Tiefe und Version ab. Deshalb wird je Dokument einmal mit einem Testmuster ausprobiert.
+const WRITERS = {
+  u8: { make: (d) => d, opts: {} },
+  u16: {
+    make: (d) => {
+      const o = new Uint16Array(d.length);
+      for (let i = 0; i < d.length; i++) o[i] = Math.round((d[i] * 32768) / 255);
+      return o;
+    },
+    opts: {},
+  },
+  u16full: {
+    make: (d) => {
+      const o = new Uint16Array(d.length);
+      for (let i = 0; i < d.length; i++) o[i] = d[i] * 257;
+      return o;
+    },
+    opts: { fullRange: true },
+  },
+};
+const writerOf = {}; // "Dokument-ID:Bit-Tiefe" -> Name der Schreibvariante
+
+async function rawPut(doc, layerID, rgba, w, h, left, top, writer) {
+  const img = await imaging.createImageDataFromBuffer(
+    writer.make(rgba),
+    Object.assign(
+      { width: w, height: h, components: 4, chunky: true, colorSpace: "RGB", colorProfile: doc.colorProfileName || "sRGB IEC61966-2.1" },
+      writer.opts
+    )
+  );
   try {
-    await put(rgba, {});
-  } catch (e8) {
-    // 16-Bit-Dokumente: Photoshop rechnet intern mit 0..32768
-    let buf16;
-    try {
-      buf16 = new Uint16Array(rgba.length);
-      for (let i = 0; i < rgba.length; i++) buf16[i] = Math.round((rgba[i] * 32768) / 255);
-      await put(buf16, { componentSize: 16 });
-    } catch (e16) {
-      throw new UserError(
-        "Photoshop hat die Pixel nicht angenommen (8 Bit: " + (e8 && e8.message) + " / 16 Bit: " + (e16 && e16.message) + ")."
-      );
+    await imaging.putPixels({ documentID: doc.id, layerID, imageData: img, targetBounds: { left, top }, replace: true });
+  } finally {
+    img.dispose();
+  }
+}
+
+/** Probiert die Schreibvarianten auf einer Testebene aus und merkt sich die erste, die stimmt. */
+async function ensureWriter(doc) {
+  const bits = bitDepth(doc);
+  const key = doc.id + ":" + bits;
+  if (writerOf[key]) return WRITERS[writerOf[key]];
+  if (bits === 32) throw new UserError("32-Bit-Dokumente werden nicht unterstützt. Bitte in 8 oder 16 Bit/Kanal umwandeln.");
+  const N = 8;
+  if (doc.width < N || doc.height < N) {
+    writerOf[key] = bits === 16 ? "u16" : "u8";
+    return WRITERS[writerOf[key]];
+  }
+  // Testmuster: links deckend, dann halbtransparent, rechts transparent
+  const pat = new Uint8Array(N * N * 4);
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const a = x < 4 ? 255 : x < 6 ? 128 : 0;
+      pat.set([200, 100, 50, a], (y * N + x) * 4);
     }
   }
+  const rect = { left: 0, top: 0, right: N, bottom: N };
+  const order = bits === 16 ? ["u16", "u16full", "u8"] : ["u8", "u16"];
+  const report = [];
+  let found = null;
+  const previous = doc.activeLayers && doc.activeLayers[0];
+  for (const name of order) {
+    const tmp = await doc.createLayer(constants.LayerKind.NORMAL, { name: "Surface Brush Test" });
+    try {
+      await rawPut(doc, tmp.id, pat, N, N, 0, 0, WRITERS[name]);
+      const back = new Uint8Array(N * N * 4);
+      await readInto(back, N, N, 4, rect, rect, doc, tmp.id);
+      const px = (x) => Array.from(back.subarray((2 * N + x) * 4, (2 * N + x) * 4 + 4));
+      const o = px(1);
+      const h = px(4);
+      const t = px(7);
+      const ok =
+        o[3] > 240 && Math.abs(o[0] - 200) < 12 && Math.abs(o[1] - 100) < 12 && Math.abs(o[2] - 50) < 12 &&
+        Math.abs(h[3] - 128) < 14 && t[3] < 10;
+      report.push(name + ": " + (ok ? "ok" : "falsch " + JSON.stringify([o, h, t])));
+      if (ok) found = name;
+    } catch (e) {
+      report.push(name + ": " + (e && e.message ? e.message : String(e)));
+    }
+    try {
+      await tmp.delete();
+    } catch (e) {
+      /* Testebene bleibt dann stehen */
+    }
+    if (found) break;
+  }
+  if (previous) await selectLayer(previous);
+  if (!found) {
+    throw new UserError("Photoshop übernimmt die Pixel nicht korrekt (" + bits + " Bit). Schreibtest: " + report.join(" | "));
+  }
+  writerOf[key] = found;
+  return WRITERS[found];
+}
+
+async function putRGBA(doc, layerID, rgba, w, h, left, top) {
+  const writer = await ensureWriter(doc);
+  await rawPut(doc, layerID, rgba, w, h, left, top, writer);
 }
 
 async function selectLayer(layer) {
@@ -492,6 +565,7 @@ async function startLive(mode, getParams, onStatus) {
   const full = { left: 0, top: 0, right: W, bottom: H };
   await withHistory(doc, "Surface Brush: Live starten", async () => {
     await step("Bild lesen", () => readInto(st.base, W, H, 3, full, full, doc, null));
+    await step("Schreibtest", () => ensureWriter(doc));
     await createLivePair(st, doc);
   });
   computeNorm(st, getParams().scale);
